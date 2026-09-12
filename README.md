@@ -95,7 +95,7 @@ jobbot/
 
 ## Cost
 
-One month of live running cost $1.59 in API calls against a $40 cap: letter writer $0.61, scoring $0.58, chat agent $0.23, inbox reader $0.16. Everything else is free and self-hosted.
+One month of live running cost $15.42 in API calls against a $40 cap: letter writer $7.58, scoring $2.34, chat agent $4.08, inbox reader $1.00. Everything else is free and self-hosted.
 
 ## How it was built
 
