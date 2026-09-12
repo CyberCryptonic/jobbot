@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0B0B0A">
+<title>JobBot · Intervention Bay</title>
+<link rel="stylesheet" href="/assets/style.css">
+<script type="importmap">{"imports":{"three":"/assets/vendor/three.module.min.js"}}</script>
+<script src="/assets/app.js" defer></script>
+</head>
+<body data-page="queue">
+<main id="main">
+  <header class="pagehead">
+    <h1>Intervention Bay <small id="count"></small></h1>
+    <p class="sub">The only jobs a human must send: Easy Apply / 1-Click platforms that forbid bots —
+      platform rules, not a malfunction. Everything is pre-chewed. Evidence on the left,
+      your three moves on the right. About sixty seconds each.</p>
+  </header>
+
+  <details class="about"><summary>How to work a card</summary>
+    <div class="body">
+      <p>1 · <b>Open &amp; Apply</b> opens the posting in a new tab (Jobright autofill arms there).<br>
+      2 · Need the letter? <b>Download PDF</b> — or <b>Write letter now</b> creates one tailored to this
+      exact posting in about half a minute, then downloads it automatically.<br>
+      3 · Tap an answer chip to copy it for the form's screening questions.<br>
+      4 · <b>Mark applied</b> when sent (it enters the tracker), or <b>Skip</b> to drop it.</p>
+      <p>Cards are sorted by fit score. Untouched cards roll to tomorrow flagged "carried".</p>
+    </div>
+  </details>
+
+  <section class="panel" style="margin-bottom:14px;">
+    <div class="panel-h"><span class="t">Quarantine bay</span>
+      <span class="m" style="margin-left:0;margin-right:auto;">waiting jobs as sealed packets — tap one to inspect its card below</span>
+      <span class="scene-tools" id="scene-tools"></span></div>
+    <div id="scene3d" class="ops3d-host loading" data-scene="queue" style="min-height:440px;"><div class="scene-loading" role="status"><span class="sl-ring" aria-hidden="true"></span><span>Initializing spatial view…</span></div></div>
+    <div class="scene-fallback-note hide" id="scene-note"></div>
+  </section>
+
+  <div class="cards-grid" id="cards"></div>
+</main>
+
+<script>
+"use strict";
+let CARDS = [], HELD = 0;
+
+function ring(score) {
+  const r = 24, c = 2 * Math.PI * r, v = Math.max(0, Math.min(100, +score || 0));
+  return `<div class="ring" title="fit score ${v} / 100" role="img" aria-label="Fit score ${v} out of 100">
+    <svg width="56" height="56" viewBox="0 0 56 56">
+      <circle class="bg" cx="28" cy="28" r="${r}" fill="none" stroke-width="4"/>
+      <circle class="fg" cx="28" cy="28" r="${r}" fill="none" stroke-width="4"
+        stroke-dasharray="${(c * v / 100).toFixed(1)} ${(c * (1 - v / 100)).toFixed(1)}"/>
+    </svg><span class="val">${score ?? "—"}</span></div>`;
+}
+
+function chipRow(answers) {
+  return answers.map((a, i) =>
+    `<button class="chip" data-copy="${i}" title="tap to copy the full answer"><b>${esc(a.q)}:</b>&nbsp;<span class="a">${esc(a.a)}</span></button>`).join("");
+}
+
+function letterButtons(c) {
+  if (c.cover_letter_path) {
+    return `<a class="btn" href="/api/application/${c.id}/letter.pdf" title="Downloads the tailored PDF">⬇ Letter (PDF)</a>
+      <button data-copyletter ${c.letter_text ? "" : "disabled"}>Copy letter text</button>`;
+  }
+  return `<button data-genletter title="Writes a letter tailored to this posting (about 30-60 seconds), then downloads it">✍ Write letter now</button>`;
+}
+
+let QSHOWN = 5;                                // phone: 5 full cards, then load more
+const narrowQ = () => matchMedia("(max-width: 900px)").matches;
+function render() {
+  const el = document.getElementById("cards");
+  document.getElementById("count").textContent =
+    (CARDS.length ? `${CARDS.length} waiting · sorted by score` : "") +
+    (HELD > 0 ? ` · ${HELD} more held in backlog` : "");
+  if (!CARDS.length) {
+    el.innerHTML = `<div class="panel empty" style="grid-column:1/-1;">
+      <span class="big" style="color:var(--ok)">✓</span>Bay clear — nothing needs your thumbs.<br>
+      <span class="sub">New one-tap jobs land here after the 6:00 AM discovery run.</span></div>`;
+    return;
+  }
+  const LIST = narrowQ() ? CARDS.slice(0, QSHOWN) : CARDS;
+  el.innerHTML = LIST.map(c => `
+    <article class="card" data-id="${c.id}" id="job-${c.id}">
+      <div class="evidence">
+        <div class="top">
+          <div style="min-width:0;">
+            <div class="co">${esc(c.company)}</div>
+            <div class="role">${esc(c.role)}</div>
+          </div>
+          ${ring(c.fit_score)}
+        </div>
+        <div class="meta">
+          ${c.tier ? `<span class="tier tier-${esc(c.tier)}">Tier ${esc(c.tier)}</span>` : ""}
+          ${srcPill(c.source)}
+          <span class="mono">${esc(c.salary_posted || "salary n/a")}</span>
+          <span>${esc(c.location || "")}</span>
+          ${c.carried_over ? `<span class="carried">carried ×${c.carried_over}</span>` : ""}
+        </div>
+        <div class="why">${esc(c.why)}</div>
+        ${c.read_first ? `<div class="warn-note">⚠ ${esc(c.read_first)}</div>` : ""}
+        ${c.screening_answers.length ? `<div class="chips">${chipRow(c.screening_answers)}</div>` : ""}
+      </div>
+      <div class="decide-col">
+        <a class="btn primary" href="${encodeURI(c.job_url || "#")}" target="_blank" rel="noopener noreferrer">Open &amp; Apply ↗</a>
+        ${letterButtons(c)}
+        <button class="good" data-applied>✓ Mark applied</button>
+        <button class="danger" data-skip>Skip</button>
+      </div>
+    </article>`).join("") +
+    (narrowQ() && CARDS.length > QSHOWN
+      ? `<div style="grid-column:1/-1;text-align:center;padding:6px 0 2px;">
+           <button id="q-more" class="btn" style="min-height:44px;padding:10px 22px;">
+             Load 5 more — ${CARDS.length - QSHOWN} still waiting</button></div>`
+      : "");
+  const more = el.querySelector("#q-more");
+  if (more) more.onclick = () => { QSHOWN += 5; render(); };
+
+  el.querySelectorAll(".card").forEach(cardEl => {
+    const card = CARDS.find(c => c.id === +cardEl.dataset.id);
+    cardEl.querySelectorAll("[data-copy]").forEach(chip =>
+      chip.onclick = () => copyText(card.screening_answers[+chip.dataset.copy].a, chip));
+    const cp = cardEl.querySelector("[data-copyletter]");
+    if (cp) cp.onclick = () => copyText(card.letter_text, cp);
+    const gen = cardEl.querySelector("[data-genletter]");
+    if (gen) gen.onclick = () => genLetter(card, gen);
+    cardEl.querySelector("[data-applied]").onclick = () => act(card.id, "applied", cardEl);
+    cardEl.querySelector("[data-skip]").onclick = () => act(card.id, "skip", cardEl);
+  });
+}
+
+async function genLetter(card, btn) {
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spin"></span> Writing… (up to a minute)`;
+  try {
+    const d = await post(`/api/application/${card.id}/letter`);
+    btn.innerHTML = "✓ Ready — downloading";
+    location.href = d.url;                        // Content-Disposition: attachment
+    setTimeout(() => load().catch(() => {}), 1200);
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = "✍ Write letter now";
+    alert("Letter not written: " + e.message);
+  }
+}
+
+async function act(id, action, cardEl) {
+  cardEl.querySelectorAll("button").forEach(b => b.disabled = true);
+  try {
+    await post(`/api/queue/${id}/${action}`);
+    CARDS = CARDS.filter(c => c.id !== id);
+    render();
+    refreshShell();
+  } catch (e) {
+    alert(`${action} failed: ${e.message}`);
+    cardEl.querySelectorAll("button").forEach(b => b.disabled = false);
+  }
+}
+
+async function load() {
+  const d = await fetchJSON("/api/queue");
+  CARDS = d.cards;
+  HELD = d.held || 0;
+  render();
+  if (S3D) syncScene();
+  if (location.hash.startsWith("#job-")) flashEl(document.querySelector(location.hash));
+}
+
+/* ---- Quarantine bay scene ---- */
+let S3D = null, SEL3D = null;
+async function init3d() {
+  let mod = null;
+  try { mod = await import("/assets/scenes3d.js"); } catch (e) { mod = null; }
+  if (!mod) return;
+  S3D = mod.initPageScene({
+    tools: document.getElementById("scene-tools"),
+    host: document.getElementById("scene3d"),
+    note: document.getElementById("scene-note"),
+    builder: mod.buildQueue,
+    buildOpts: { onPick: id => {
+      if (!id || id === "you") return;
+      SEL3D = id;
+      syncScene();
+      const card = document.getElementById("job-" + id);
+      if (card) flashEl(card);
+    } },
+    extra: `<button type="button" class="small ghost" data-prev title="Previous packet">◂</button>
+            <button type="button" class="small ghost" data-next title="Next packet">▸</button>`,
+  });
+  if (!S3D) return;
+  const step = d => {
+    if (!CARDS.length) return;
+    const i = Math.max(0, CARDS.findIndex(c => String(c.id) === String(SEL3D)));
+    SEL3D = String(CARDS[(i + d + CARDS.length) % CARDS.length].id);
+    S3D.scene.select(SEL3D, { silent: true });
+    syncScene();
+    const card = document.getElementById("job-" + SEL3D);
+    if (card) flashEl(card);
+  };
+  document.querySelector("[data-prev]").onclick = () => step(-1);
+  document.querySelector("[data-next]").onclick = () => step(1);
+  syncScene();
+}
+function syncScene() {
+  if (!S3D) return;
+  if (!SEL3D && CARDS.length) SEL3D = String(CARDS[0].id);
+  S3D.setData(CARDS.map(c => ({ ...c, source_label: srcLabel(c.source) })), SEL3D);
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  skelCards(document.getElementById("cards"), 3);
+  load().then(() => init3d()).catch(e => {
+    document.getElementById("cards").innerHTML =
+      `<div class="err">queue failed to load: ${esc(e.message)}</div>`;
+  });
+});
+</script>
+</body>
+</html>

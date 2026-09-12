@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0B0B0A">
+<title>JobBot · Mission Control</title>
+<link rel="stylesheet" href="/assets/style.css">
+<script type="importmap">{"imports":{"three":"/assets/vendor/three.module.min.js"}}</script>
+<script src="/assets/vendor/chart.umd.min.js" defer></script>
+<script src="/assets/app.js" defer></script>
+<script src="/assets/charts.js" defer></script>
+</head>
+<body data-page="overview">
+<main id="main">
+  <header class="pagehead">
+    <h1>Mission Control</h1>
+    <p class="sub">The whole system at a glance: what ran, what it produced, what it cost,
+      and whether anything is waiting on you.</p>
+  </header>
+
+  <section class="hero" id="hero">
+    <div class="h-main">
+      <p class="statement" id="statement"><span class="skel" style="display:inline-block;width:340px;height:20px;"></span></p>
+      <div style="display:flex;gap:34px;flex-wrap:wrap;margin-top:14px;" id="nownext"></div>
+    </div>
+    <div class="h-side">
+      <div class="microcap" style="margin-bottom:10px;">Needs you</div>
+      <div id="needs-side"><div class="skel" style="height:70px"></div></div>
+    </div>
+  </section>
+
+  <section class="panel" style="margin-top:16px;">
+    <div class="panel-h"><span class="t">Mission table</span>
+      <span class="m" style="margin-left:0;margin-right:auto;">a living miniature of the whole operation — tap a zone to open its page</span>
+      <span class="scene-tools" id="scene-tools"></span></div>
+    <div id="scene3d" class="ops3d-host loading" data-scene="overview" style="min-height:540px;"><div class="scene-loading" role="status"><span class="sl-ring" aria-hidden="true"></span><span>Initializing spatial view…</span></div></div>
+    <div class="scene-fallback-note hide" id="scene-note"></div>
+  </section>
+
+  <section class="panel" style="margin-top:16px;">
+    <div class="panel-b" style="padding-top:6px;padding-bottom:10px;">
+      <div class="statstrip" id="strip"></div>
+    </div>
+  </section>
+
+  <div class="grid2" style="margin-top:16px;">
+    <section class="panel">
+      <div class="panel-h"><span class="t">Activity — last 14 days</span><span class="m">jobs found vs applications sent, per day</span></div>
+      <div class="panel-b">
+        <div class="hlegend" id="lg-activity"></div>
+        <div class="chart-box" style="height:230px;"><canvas id="ch-activity" role="img" aria-label="Daily bar chart of jobs found versus applications sent over the last 14 days"></canvas></div>
+      </div>
+    </section>
+    <section class="panel">
+      <div class="panel-h"><span class="t">Where jobs come from</span><span class="m">every source, all time</span></div>
+      <div class="panel-b">
+        <div class="hlegend" id="lg-sources"></div>
+        <div class="chart-box" style="height:230px;"><canvas id="ch-sources" role="img" aria-label="Horizontal bars of jobs found and applications sent per source"></canvas></div>
+      </div>
+    </section>
+  </div>
+
+  <div class="grid2" style="margin-top:14px;">
+    <section class="panel">
+      <div class="panel-h"><span class="t">Pipeline funnel</span><span class="m">every job ever seen, by stage</span></div>
+      <div class="panel-b">
+        <div class="chart-box" style="height:240px;"><canvas id="ch-funnel" role="img" aria-label="Horizontal funnel bars from found through offer"></canvas></div>
+      </div>
+    </section>
+    <section class="panel">
+      <div class="panel-h"><span class="t">Cost to run</span><span class="m" id="cost-cap"></span></div>
+      <div class="panel-b" id="cost-body"><div class="skel skel-chart"></div></div>
+    </section>
+  </div>
+
+  <h2>Agent health <small>— last run of each stage</small></h2>
+  <details class="about"><summary>What is this?</summary>
+    <div class="body"><p>Each row is one automated agent. Green <b>ok</b> means its last run finished clean;
+    red <b>fail</b> means it crashed (Agent Mesh has the full story). Tokens is the AI usage that run consumed.</p></div>
+  </details>
+  <section class="panel tbl-wrap">
+    <table>
+      <thead><tr><th>Agent</th><th>Last run</th><th>Outcome</th>
+        <th class="num">Duration</th><th class="num">Tokens</th><th>Note</th></tr></thead>
+      <tbody id="stages"></tbody>
+    </table>
+  </section>
+
+  <h2>Source health <small>— found per run vs previous</small></h2>
+  <section class="panel tbl-wrap">
+    <table>
+      <thead><tr><th>Source</th><th>Last run</th><th class="num">Found</th>
+        <th class="num">Previous</th><th>Status</th></tr></thead>
+      <tbody id="sources"></tbody>
+    </table>
+  </section>
+
+  <h2>Recent activity</h2>
+  <section class="panel tbl-wrap">
+    <table>
+      <thead><tr><th>Time</th><th>Agent</th><th>Action</th><th>Subject</th>
+        <th>Outcome</th><th>Reason</th></tr></thead>
+      <tbody id="recent"></tbody>
+    </table>
+  </section>
+</main>
+
+<script>
+"use strict";
+const STAGE_NAME = { discovery: "Discovery", scoring: "Scoring", materials: "Letter writer",
+  submission: "Submission", inbox: "Inbox reader", followup: "Follow-ups",
+  report: "Nightly report", chat: "Chat agent", ui: "Dashboard", system: "System" };
+
+let charts = {};
+function draw(id, maker) { if (charts[id]) charts[id].destroy(); charts[id] = maker(); }
+const stat = (label, value, sub, cls = "") =>
+  `<div class="stat ${cls}"><div class="label">${label}</div><div class="value">${value}</div>
+   ${sub ? `<div class="sub">${sub}</div>` : ""}</div>`;
+
+let OV = null;
+
+function renderHero() {
+  if (!OV || !SHELL) return;
+  const d = OV, s = SHELL;
+  const state = s.paused ? "paused" : s.dry_run ? "in dry run"
+    : (s.auto && s.auto.awaiting_review) ? "holding for your review" : "fully autonomous";
+  const needs = (s.notifications || []).filter(n => n.group === "needs_you");
+  document.getElementById("statement").innerHTML =
+    `The system is <span class="em">${esc(state)}</span>. Today it found
+     <span class="num">${d.today.discovered}</span> jobs, sent
+     <span class="num">${d.today.applied}</span> application${d.today.applied === 1 ? "" : "s"}, and spent
+     <span class="num">${fmt.money(d.spend.today_usd)}</span>.` +
+    (needs.length ? ` <span class="em">${needs.length} item${needs.length > 1 ? "s" : ""}</span> need${needs.length > 1 ? "" : "s"} your hand.`
+                  : ` Nothing needs your hand.`);
+
+  const runs = s.running || [];
+  const now = runs.length
+    ? runs.map(r => `<div class="mono" style="color:var(--data);font-size:13px;">● ${esc(STAGE_NAME[r.stage] || r.stage)} — running since ${esc(fmt.ts(r.since))}</div>`).join("")
+    : `<div class="sub">Idle — every agent is between scheduled runs.</div>`;
+  const next = (s.next_runs || []).slice(0, 3).map(n =>
+    `<div style="font-size:13px;"><span class="mono" style="color:var(--ink)">${esc(ampm(n.at.slice(11, 16)))}</span>
+     <span style="color:var(--ink-2)"> ${esc(n.label)}</span></div>`).join("") || `<div class="sub">nothing scheduled</div>`;
+  document.getElementById("nownext").innerHTML = `
+    <div><div class="microcap" style="margin-bottom:7px;">Happening now</div>${now}</div>
+    <div><div class="microcap" style="margin-bottom:7px;">Next up</div>${next}</div>`;
+
+  const wk = d.week, rate = wk.applied ? Math.round(100 * wk.responded / wk.applied) : null;
+  const spendPct = Math.round(100 * d.spend.mtd_usd / d.spend.cap_usd);
+  document.getElementById("strip").innerHTML =
+    stat("Sent all-time", fmt.int(d.totals.applied)) +
+    stat("Active pipeline", d.totals.active, "awaiting response") +
+    stat("Interviews", d.totals.interviews, "", d.totals.interviews ? "ember" : "") +
+    stat("Response 7d", rate === null ? "—" : rate + '<span class="unit">%</span>', `${wk.responded} of ${wk.applied}`) +
+    stat("Spend today", fmt.money(d.spend.today_usd), fmt.tokens(d.spend.today_tokens) + " tokens") +
+    stat("Month", fmt.money(d.spend.mtd_usd), `${spendPct}% of $${d.spend.cap_usd} cap`, spendPct >= 100 ? "alert" : "");
+
+  const side = document.getElementById("needs-side");
+  if (!needs.length) {
+    side.innerHTML = `<div style="color:var(--ok);font-weight:600;font-size:14px;">✓ Nothing.</div>
+      <div class="sub" style="margin-top:6px;">Your day with this system is over. Interview requests
+      and blockers will land here and on your phone.</div>`;
+  } else {
+    side.innerHTML = needs.slice(0, 4).map(n => `
+      <a href="${esc(n.target)}" style="display:block;color:var(--ink);font-size:13px;font-weight:600;
+        padding:9px 11px;margin-bottom:7px;background:var(--em-soft);border:1px solid rgba(240,138,75,.3);
+        border-radius:8px;">${esc(n.title)}<span class="sub" style="display:block;font-weight:400;margin-top:2px;">${esc((n.detail || "").slice(0, 88))}${(n.detail || "").length > 88 ? "…" : ""}</span></a>`).join("") +
+      `<button class="small" style="margin-top:4px;" onclick="toggleDrawer(true)">Open notifications</button>`;
+  }
+}
+
+async function loadOverview() {
+  OV = await fetchJSON("/api/overview");
+  renderHero();
+  syncScene().catch(() => {});
+  document.getElementById("stages").innerHTML = OV.stages.map(s => `
+    <tr>
+      <td>${esc(STAGE_NAME[s.stage] || s.stage)}</td>
+      <td class="mono">${esc(fmt.ts(s.start_ts))}</td>
+      <td><span class="o o-${esc(s.outcome)}">${esc(s.outcome)}</span></td>
+      <td class="num">${fmt.ms(s.duration_ms)}</td>
+      <td class="num">${fmt.tokens(s.tokens)}</td>
+      <td>${esc(s.reason)}</td>
+    </tr>`).join("") || `<tr><td colspan="6" class="empty">no runs yet</td></tr>`;
+
+  document.getElementById("sources").innerHTML = (OV.sources || []).map(s => {
+    let note = "", cls = "o-ok", label = "ok";
+    if (s.found === null) { cls = "o-skip"; label = "off"; note = "disabled"; }
+    else if (s.found === 0 && s.prev > 0) { cls = "o-fail"; label = "quiet"; note = `WENT QUIET — was ${s.prev} last run`; }
+    else if (s.found > 0 && !s.prev) { note = "first results from this source"; label = "new"; }
+    return `<tr>
+      <td class="mono">${esc(s.source)}</td>
+      <td class="mono">${esc(fmt.ts(s.last_ts))}</td>
+      <td class="num">${s.found ?? "—"}</td>
+      <td class="num">${s.prev ?? "—"}</td>
+      <td><span class="o ${cls}">${label}</span> ${esc(note)}</td>
+    </tr>`;
+  }).join("") || `<tr><td colspan="5" class="empty">no discovery runs yet</td></tr>`;
+
+  document.getElementById("recent").innerHTML = OV.recent.map(r => `
+    <tr>
+      <td class="mono">${esc(fmt.ts(r.ts))}</td>
+      <td>${esc(STAGE_NAME[r.stage] || r.stage)}</td>
+      <td class="mono">${esc(r.action)}</td>
+      <td>${esc(r.subject || "")}</td>
+      <td><span class="o o-${esc(r.outcome)}">${esc(r.outcome)}</span></td>
+      <td>${esc(r.reason || "")}</td>
+    </tr>`).join("") || `<tr><td colspan="6" class="empty">no activity yet</td></tr>`;
+}
+
+async function loadStats() {
+  const d = await fetchJSON("/api/stats?days=30");
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const s1 = css("--s1"), s2 = css("--s2"), s3 = css("--s3");
+
+  const last14 = d.days.slice(-14);
+  const dayLbl = last14.map(x => x.d.slice(5).replace("-", "/"));
+  legendRow(document.getElementById("lg-activity"),
+    [{ color: s1, label: "Jobs found" }, { color: s3, label: "Applications sent" }]);
+  draw("act", () => barsChart(document.getElementById("ch-activity"), dayLbl, [
+    { label: "Jobs found", data: last14.map(x => x.discovered), color: s1 },
+    { label: "Applications sent", data: last14.map(x => x.applied), color: s3 },
+  ]));
+
+  const srcs = d.sources.slice(0, 8);
+  legendRow(document.getElementById("lg-sources"),
+    [{ color: s1, label: "Found" }, { color: s2, label: "Applied" }]);
+  draw("src", () => hbarChart(document.getElementById("ch-sources"),
+    srcs.map(s => s.label), srcs.map(s => s.discovered),
+    { color: s1, series2: { label: "Applied", data: srcs.map(s => s.applied), color: s2, firstLabel: "Found" } }));
+
+  const FUN = ["discovered", "queued", "applied", "screening", "interview", "offer"];
+  const fn = FUN.map(k => (d.funnel.find(f => f.status === k) || {}).n || 0);
+  draw("fun", () => hbarChart(document.getElementById("ch-funnel"),
+    ["Found", "Queued", "Applied", "Screening", "Interview", "Offer"], fn, { color: s1 }));
+
+  const pct = Math.round(100 * d.cost.mtd / d.cost.cap);
+  document.getElementById("cost-cap").textContent = `$${d.cost.cap} monthly cap`;
+  document.getElementById("cost-body").innerHTML = `
+    <div style="display:flex;align-items:baseline;gap:18px;flex-wrap:wrap;">
+      <div><div class="sub">This month</div><div class="mono" style="font-size:30px;font-weight:600;color:var(--ink)">${fmt.money(d.cost.mtd)}</div></div>
+      <div><div class="sub">Today</div><div class="mono" style="font-size:19px;color:var(--ink-2)">${fmt.money(d.cost.today)}</div></div>
+      <div style="flex:1;min-width:150px;">
+        <div class="sub">${pct}% of cap used</div>
+        <div class="meter ${pct >= 100 ? "over" : pct >= 80 ? "hot" : ""}" style="height:6px;"><i style="width:${Math.min(pct, 100)}%"></i></div>
+      </div>
+    </div>
+    <div class="chart-box" style="height:120px;margin-top:14px;"><canvas id="ch-spend" role="img" aria-label="Daily API spend bars for the last 30 days"></canvas></div>
+    <div class="sub" style="margin-top:10px;">${(d.by_stage_mtd || []).filter(x => x.cost > 0).slice(0, 5)
+      .map(x => `${esc(STAGE_NAME[x.stage] || x.stage)} ${fmt.money(x.cost)}`).join(" · ") || "no spend recorded yet"}</div>`;
+  draw("spend", () => barsChart(document.getElementById("ch-spend"),
+    d.days.map(x => x.d.slice(5).replace("-", "/")),
+    [{ label: "Spend ($)", data: d.days.map(x => x.spend), color: s1 }],
+    { fmtTip: c => " $" + (+c.parsed.y).toFixed(2) }));
+}
+
+/* ---- Mission table (3D digital twin; progressive enhancement) ---- */
+let S3D = null, PERIOD = 1;
+async function init3d() {
+  let mod = null;
+  try { mod = await import("/assets/scenes3d.js"); } catch (e) { mod = null; }
+  if (!mod) return;
+  S3D = mod.initPageScene({
+    tools: document.getElementById("scene-tools"),
+    host: document.getElementById("scene3d"),
+    note: document.getElementById("scene-note"),
+    builder: mod.buildOverview,
+    buildOpts: { onZone: id => { if (id && id.startsWith("/")) location.href = id === "/" ? "/agent" : id; } },
+    extra: `<span class="seg" role="group" aria-label="Period" data-periods>
+      <button type="button" data-p="1" aria-pressed="true">Today</button>
+      <button type="button" data-p="7" aria-pressed="false">7d</button>
+      <button type="button" data-p="30" aria-pressed="false">30d</button>
+      <button type="button" data-p="90" aria-pressed="false">All</button></span>`,
+  });
+  if (!S3D) return;
+  document.querySelectorAll("[data-periods] [data-p]").forEach(b => b.onclick = () => {
+    document.querySelectorAll("[data-periods] [data-p]").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+    PERIOD = +b.dataset.p;
+    syncScene();
+  });
+  syncScene();
+}
+async function syncScene() {
+  if (!S3D || !SHELL) return;
+  let found, applied;
+  if (PERIOD === 1 && OV) { found = OV.today.discovered; applied = OV.today.applied; }
+  else {
+    const d = await fetchJSON(`/api/stats?days=${PERIOD}`).catch(() => null);
+    if (!d) return;
+    found = d.days.reduce((a, x) => a + x.discovered, 0);
+    applied = d.days.reduce((a, x) => a + x.applied, 0);
+  }
+  const s = SHELL;
+  const state = s.paused ? "PAUSED" : s.dry_run ? "DRY RUN"
+    : (s.auto && s.auto.awaiting_review) ? "REVIEW HOLD" : "AUTONOMOUS";
+  S3D.setData({ found, applied, queue: s.queue_count,
+    needs: (s.notifications || []).filter(n => n.group === "needs_you").length, state });
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  skelRows(document.getElementById("stages"), 6, 5);
+  init3d().catch(() => {});
+  document.addEventListener("shell", () => syncScene());
+  skelRows(document.getElementById("sources"), 5, 4);
+  skelRows(document.getElementById("recent"), 6, 6);
+  const fail = e => document.getElementById("statement").innerHTML =
+    `<span class="err">overview failed to load: ${esc(e.message)}</span>`;
+  loadOverview().catch(fail);
+  loadStats().catch(fail);
+  document.addEventListener("shell", renderHero);
+  setInterval(() => { loadOverview().catch(() => {}); }, 60000);
+});
+</script>
+</body>
+</html>

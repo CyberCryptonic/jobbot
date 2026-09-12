@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0B0B0A">
+<title>JobBot · Signal Intelligence</title>
+<link rel="stylesheet" href="/assets/style.css">
+<script type="importmap">{"imports":{"three":"/assets/vendor/three.module.min.js"}}</script>
+<script src="/assets/app.js" defer></script>
+</head>
+<body data-page="inbox">
+<main id="main">
+  <header class="pagehead">
+    <h1>Signal Intelligence <small id="mode"></small></h1>
+    <p class="sub">Every email the reader classified, twice a day (12:00 PM and 6:30 PM). Interview
+      requests page your phone the moment they land. If a classification looks wrong, change it —
+      your correction is what the tracker uses.</p>
+  </header>
+
+  <details class="about"><summary>What the classes mean</summary>
+    <div class="body"><p><b>interview</b>/<b>offer</b> — the good ones; they fire an instant phone push.
+    <b>action needed</b> — an employer asked for something (a form, a document, a reply).
+    <b>rejection</b> updates the tracker. <b>confirmation</b> is "we received your application".
+    <b>noise</b> is marketing and job-board blast. Tap any row for the message excerpt; use the dropdown
+    to correct a class — the next live pass applies your correction.</p></div>
+  </details>
+
+  <section class="panel" style="margin-bottom:14px;">
+    <div class="panel-h"><span class="t">Signal array</span>
+      <span class="m" style="margin-left:0;margin-right:auto;">inbound employer telemetry, classified into bins — tap a bin to filter</span>
+      <span class="scene-tools" id="scene-tools"></span></div>
+    <div id="scene3d" class="ops3d-host loading" data-scene="inbox" style="min-height:380px;"><div class="scene-loading" role="status"><span class="sl-ring" aria-hidden="true"></span><span>Initializing spatial view…</span></div></div>
+    <div class="scene-fallback-note hide" id="scene-note"></div>
+  </section>
+
+  <div class="fchips" id="class-chips"></div>
+
+  <div class="filters">
+    <select id="f-days" aria-label="Time window">
+      <option value="3">last 3 days</option><option value="7">last 7 days</option>
+      <option value="45" selected>last 45 days</option><option value="120">last 120 days</option>
+    </select>
+    <label><input type="checkbox" id="f-hidenoise" checked> hide rule-filed noise</label>
+    <input type="search" id="f-q" placeholder="Search sender, subject, company…" aria-label="Search emails" autocomplete="off">
+  </div>
+
+  <div class="panel tbl-wrap" style="max-height:70vh;overflow-y:auto;">
+    <table>
+      <thead><tr>
+        <th>When</th><th>From</th><th>Subject</th><th>Class</th><th>Company — role</th>
+        <th>Match</th><th>Summary</th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+</main>
+
+<script>
+"use strict";
+const CLASSES = ["confirmation", "rejection", "interview", "offer", "action_needed", "noise"];
+let DATA = null, openDetail = null, CLASS_FILTER = "";
+
+function senderInitials(addr) {
+  const dom = (addr.split("@")[1] || addr).replace(/^(mail|alerts?|jobs?|noreply|no-reply|notifications?)\./, "");
+  return dom.slice(0, 2);
+}
+
+function classCell(r) {
+  const eff = r.class_override || r.class;
+  const opts = CLASSES.map(c => `<option value="${c}" ${c === eff ? "selected" : ""}>${c.replace("_", " ")}</option>`).join("");
+  const over = r.class_override ? `<div class="sub">was ${esc(r.class)}</div>` : "";
+  const kind = r.kind ? `<div class="sub mono">${esc(r.kind)}${r.confidence != null ? " · " + Number(r.confidence).toFixed(2) : ""}</div>` : "";
+  return `<select class="cls cls-${esc(eff)}" data-id="${r.id}" title="correct the classification — the tracker follows your choice">${opts}</select>${over}${kind}`;
+}
+
+function renderClassChips() {
+  const counts = {};
+  for (const r of DATA.rows) {
+    const eff = r.class_override || r.class;
+    counts[eff] = (counts[eff] || 0) + 1;
+  }
+  document.getElementById("class-chips").innerHTML =
+    [["", DATA.rows.length]].concat(CLASSES.map(c => [c, counts[c] || 0]))
+    .map(([c, n]) => `<button class="fchip ${CLASS_FILTER === c ? "on" : ""}" data-cls="${c}">
+      ${c ? `<span class="cls-${c}">${c.replace("_", " ")}</span>` : "all"} <b>${n}</b></button>`).join("");
+  document.querySelectorAll("#class-chips .fchip").forEach(b => b.onclick = () => {
+    CLASS_FILTER = b.dataset.cls;
+    render();
+    renderClassChips();
+  });
+}
+
+function render() {
+  const q = document.getElementById("f-q").value.trim().toLowerCase();
+  const hide = document.getElementById("f-hidenoise").checked;
+  const rows = DATA.rows.filter(r => {
+    const eff = r.class_override || r.class;
+    if (CLASS_FILTER && eff !== CLASS_FILTER) return false;
+    if (hide && eff === "noise" && r.method === "rule" && CLASS_FILTER !== "noise") return false;
+    if (q && !`${r.from_addr} ${r.subject} ${r.company || ""} ${r.role || ""}`.toLowerCase().includes(q)) return false;
+    return true;
+  });
+  const body = document.getElementById("rows");
+  if (!rows.length) { body.innerHTML = `<tr><td colspan="7" class="empty">nothing matches</td></tr>`; return; }
+  body.innerHTML = rows.map(r => {
+    const eff = r.class_override || r.class;
+    return `
+    <tr class="clickable ${r.suspicious ? "flagged" : ""} ${eff === "action_needed" ? "act-needed" : ""}" data-id="${r.id}" id="msg-${r.id}">
+      <td class="mono">${esc(fmt.ts(r.msg_ts))}</td>
+      <td title="${esc(r.from_addr)}"><span style="display:inline-flex;align-items:center;gap:8px;max-width:100%;">
+        <span class="avatar" aria-hidden="true">${esc(senderInitials(r.from_addr))}</span>
+        <span class="mono" style="overflow:hidden;text-overflow:ellipsis;">${esc(r.from_addr.length > 26 ? r.from_addr.slice(0, 24) + "…" : r.from_addr)}</span></span></td>
+      <td>${esc(r.subject || "")}${r.suspicious ? ' <span class="pill flag" title="email contained text addressed to an automated system">⚑ addressed to automation</span>' : ""}</td>
+      <td>${classCell(r)}</td>
+      <td>${esc(r.company || "")}${r.role ? `<div class="sub">${esc(r.role)}</div>` : ""}</td>
+      <td class="mono">${r.application_id ? `<a href="/applications#app-${r.application_id}">#${r.application_id}</a><div class="sub">${esc(r.match_how || "")}</div>` : `<span class="sub">${esc(r.match_how || "—")}</span>`}</td>
+      <td>${esc(r.summary || "")}${r.deadline ? `<div class="sub" style="color:var(--warn)">deadline ${esc(r.deadline)}</div>` : ""}${r.applied_at ? `<div class="sub">applied to tracker ${esc(fmt.ts(r.applied_at))}</div>` : ""}</td>
+    </tr>`;
+  }).join("");
+  body.querySelectorAll("select.cls").forEach(sel => {
+    sel.onclick = e => e.stopPropagation();
+    sel.onchange = async () => {
+      sel.disabled = true;
+      try {
+        await post(`/api/inbox/${sel.dataset.id}/class`, { cls: sel.value });
+        await load();
+      } catch (err) { alert(err.message); sel.disabled = false; }
+    };
+  });
+  body.querySelectorAll("tr.clickable").forEach(tr => tr.onclick = () => toggleDetail(tr));
+}
+
+function toggleDetail(tr) {
+  const r = DATA.rows.find(x => String(x.id) === tr.dataset.id);
+  const was = openDetail && openDetail.dataset.for === tr.dataset.id;
+  if (openDetail) { openDetail.remove(); openDetail = null; }
+  if (was) return;
+  const det = document.createElement("tr");
+  det.className = "detail-row"; det.dataset.for = tr.dataset.id;
+  det.innerHTML = `<td colspan="7">
+    <div class="sub">uid ${r.uid} · classified by ${esc(r.method)} · seen ${esc(fmt.ts(r.seen_ts))} · from ${esc(r.from_addr)}</div>
+    <div style="margin-top:6px;white-space:pre-wrap;font-size:13px;">${esc(r.excerpt || "(no excerpt stored — rule-classified)")}</div>
+  </td>`;
+  tr.after(det); openDetail = det;
+}
+
+async function load() {
+  const days = document.getElementById("f-days").value;
+  DATA = await fetchJSON(`/api/inbox?days=${days}`);
+  document.getElementById("mode").textContent =
+    (DATA.dry_run ? "DRY RUN — classified, tracker untouched" : "LIVE") +
+    (DATA.last_run ? ` · last pass ${fmt.ts(DATA.last_run)}` : " · no pass yet") +
+    (DATA.overrides ? ` · ${DATA.overrides} corrected by you` : "");
+  openDetail = null;
+  renderClassChips();
+  render();
+  if (S3D) syncScene();
+  if (location.hash.startsWith("#msg-")) flashEl(document.querySelector(location.hash));
+}
+
+/* ---- Signal array scene ---- */
+let S3D = null;
+async function init3d() {
+  let mod = null;
+  try { mod = await import("/assets/scenes3d.js"); } catch (e) { mod = null; }
+  if (!mod) return;
+  S3D = mod.initPageScene({
+    tools: document.getElementById("scene-tools"),
+    host: document.getElementById("scene3d"),
+    note: document.getElementById("scene-note"),
+    builder: mod.buildInbox,
+    buildOpts: { onPickClass: id => {
+      if (!id || id === "recv" || id === "ext" || id === "you") return;
+      CLASS_FILTER = CLASS_FILTER === id ? "" : id;
+      render();
+      renderClassChips();
+    } },
+  });
+  if (S3D) syncScene();
+}
+function syncScene() {
+  if (!S3D || !DATA) return;
+  const counts = {};
+  for (const r of DATA.rows) {
+    const eff = r.class_override || r.class;
+    counts[eff] = (counts[eff] || 0) + 1;
+  }
+  S3D.setData(counts);
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  init3d().catch(() => {});
+  if (qparam("class")) CLASS_FILTER = qparam("class");
+  skelRows(document.getElementById("rows"), 7, 8);
+  ["f-hidenoise"].forEach(id => document.getElementById(id).addEventListener("change", render));
+  document.getElementById("f-days").addEventListener("change", load);
+  document.getElementById("f-q").addEventListener("input", render);
+  load().catch(e => { document.getElementById("rows").innerHTML = `<tr><td colspan="7" class="empty">${esc(e.message)}</td></tr>`; });
+});
+</script>
+</body>
+</html>

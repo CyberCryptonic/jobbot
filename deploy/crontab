@@ -1,0 +1,21 @@
+# jobbot schedule — the real production crontab, verbatim except for paths.
+# Install with:  crontab deploy/crontab   (as the user that owns the project)
+# Times are local (set the container timezone first; see docs/BUILD-GUIDE.md).
+# Every entry cds to the project root so relative paths (logs/, letters/,
+# config.json, the PAUSE file) resolve. $HOME/jobbot assumes the default
+# checkout location; adjust once here if yours differs.
+#
+# 6:00 AM  discovery + scoring + letters + queue build
+# 8:00 AM  submission batch
+# 11:00 AM / 2:00 PM / 5:00 PM  top-up passes (fill remaining daily quota)
+# 12:00 PM / 6:30 PM  inbox passes
+# 7:00 PM  nightly report
+
+0 6 * * *   cd $HOME/jobbot && ./venv/bin/python discovery.py  >> logs/discovery.log 2>&1
+0 8 * * *   cd $HOME/jobbot && ./venv/bin/python submission.py >> logs/submission.log 2>&1
+0 11 * * *  cd $HOME/jobbot && ./venv/bin/python topup.py      >> logs/topup.log 2>&1
+0 12 * * *  cd $HOME/jobbot && ./venv/bin/python inbox.py      >> logs/inbox.log 2>&1
+0 14 * * *  cd $HOME/jobbot && ./venv/bin/python topup.py      >> logs/topup.log 2>&1
+0 17 * * *  cd $HOME/jobbot && ./venv/bin/python topup.py      >> logs/topup.log 2>&1
+30 18 * * * cd $HOME/jobbot && ./venv/bin/python inbox.py      >> logs/inbox.log 2>&1
+0 19 * * *  cd $HOME/jobbot && ./venv/bin/python report.py     >> logs/report.log 2>&1

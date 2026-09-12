@@ -1,0 +1,16 @@
+[Unit]
+Description=jobbot dashboard web service (Flask/waitress on 127.0.0.1:8090)
+After=network.target
+
+[Service]
+Type=simple
+# Set User to the account that owns the project checkout, and both paths to
+# your project root (install-services.sh substitutes these automatically).
+User=YOURUSER
+WorkingDirectory=/home/YOURUSER/jobbot
+ExecStart=/home/YOURUSER/jobbot/venv/bin/python /home/YOURUSER/jobbot/web.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

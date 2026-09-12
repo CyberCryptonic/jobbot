@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0B0B0A">
+<title>JobBot · Opportunity Pipeline</title>
+<link rel="stylesheet" href="/assets/style.css">
+<script type="importmap">{"imports":{"three":"/assets/vendor/three.module.min.js"}}</script>
+<script src="/assets/app.js" defer></script>
+</head>
+<body data-page="applications">
+<main id="main">
+  <header class="pagehead">
+    <h1>Opportunity Pipeline <small id="count"></small></h1>
+    <p class="sub">Every job the system has ever seen, from first sighting to final outcome.
+      Tap a status chip to filter, tap any row for the full record and its complete history.</p>
+  </header>
+
+  <div class="tiles" id="tiles" style="margin-bottom:14px;"></div>
+
+  <details class="about"><summary>What the columns mean</summary>
+    <div class="body"><p><b>Score</b> is the 0-100 fit the scorer gave the posting; <b>Tier</b> A/B/C is the
+    role family (A = SOC/security analyst titles). <b>Route</b> is how it applies: <i>ats</i> and <i>direct</i>
+    go automatically; <i>native</i> (Easy Apply) waits for you in the Manual queue. <b>Source</b> is where the
+    job was found. A <span class="pill warn">×2</span> beside a company means two applications already sent
+    there (three blocks a fourth); <span class="pill flag">⚑</span> flags a posting that contained text
+    addressed to automation.</p></div>
+  </details>
+
+  <section class="panel" style="margin-bottom:14px;">
+    <div class="panel-h"><span class="t">Transit network</span>
+      <span class="m" style="margin-left:0;margin-right:auto;">every tracked job at its verified stage — tap a gate to filter the table</span>
+      <span class="scene-tools" id="scene-tools"></span></div>
+    <div id="scene3d" class="ops3d-host loading" data-scene="pipeline" style="min-height:380px;"><div class="scene-loading" role="status"><span class="sl-ring" aria-hidden="true"></span><span>Initializing spatial view…</span></div></div>
+    <div class="scene-fallback-note hide" id="scene-note"></div>
+  </section>
+
+  <div class="fchips" id="status-chips"></div>
+
+  <div class="filters">
+    <select id="f-tier" aria-label="Filter by tier">
+      <option value="">tier: all</option><option>A</option><option>B</option><option>C</option>
+    </select>
+    <select id="f-route" aria-label="Filter by route">
+      <option value="">route: all</option><option>ats</option><option>native</option><option>direct</option>
+    </select>
+    <input type="search" id="f-q" placeholder="Search company, role, notes…" aria-label="Search applications" autocomplete="off">
+  </div>
+
+  <div id="pinned"></div>
+
+  <div class="panel tbl-wrap" style="max-height:70vh;overflow-y:auto;">
+    <table>
+      <thead><tr>
+        <th data-sort="date_applied" class="sortable">Date</th>
+        <th data-sort="company" class="sortable">Company · Role</th>
+        <th data-sort="tier" class="sortable">Tier</th>
+        <th data-sort="fit_score" class="sortable num">Score</th>
+        <th data-sort="apply_route" class="sortable">Route</th>
+        <th data-sort="source" class="sortable">Source</th>
+        <th data-sort="status" class="sortable">Status</th>
+        <th>Salary</th>
+        <th data-sort="last_update" class="sortable">Updated</th>
+        <th>Next action</th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+</main>
+
+<script>
+"use strict";
+let openDetail = null, DATA = null, STATUS_FILTER = "";
+let SORT = { key: "date_applied", dir: -1 };
+try { SORT = JSON.parse(localStorage.getItem("apps-sort")) || SORT; } catch (e) {}
+
+const NUMERIC = new Set(["fit_score"]);
+const CHIP_ORDER = ["", "queued", "applied", "screening", "interview", "offer",
+                    "rejected", "ghosted", "discovered", "skipped"];
+
+function sortRows(rows) {
+  const { key, dir } = SORT;
+  const val = r => {
+    const v = r[key];
+    if (v == null || v === "") return null;
+    return NUMERIC.has(key) ? +v : String(v).toLowerCase();
+  };
+  return [...rows].sort((a, b) => {
+    const x = val(a), y = val(b);
+    if (x === null && y === null) return b.id - a.id;
+    if (x === null) return 1;
+    if (y === null) return -1;
+    if (x < y) return -dir;
+    if (x > y) return dir;
+    return b.id - a.id;
+  });
+}
+
+function paintHeaders() {
+  document.querySelectorAll("th.sortable").forEach(th => {
+    th.classList.toggle("on", th.dataset.sort === SORT.key);
+    th.dataset.arrow = th.dataset.sort === SORT.key ? (SORT.dir > 0 ? "▲" : "▼") : "";
+  });
+}
+
+function companyCell(r, counts) {
+  const n = counts[r.company_norm] || 0;
+  let pill = "";
+  if (n >= 3) pill = ` <span class="pill fail" title="${n} applications sent — the pipeline blocks a 4th">×${n} blocked</span>`;
+  else if (n === 2) pill = ` <span class="pill warn" title="2 applications already sent here">×2</span>`;
+  const flag = r.suspicious ? ` <span class="pill flag" title="posting contained text addressed to automation">⚑</span>` : "";
+  return esc(r.company) + pill + flag;
+}
+
+async function loadTiles() {
+  const d = await fetchJSON("/api/stats");
+  const g = k => (d.funnel.find(f => f.status === k) || {}).n || 0;
+  const sent = g("applied") + g("screening") + g("interview") + g("offer") + g("rejected") + g("ghosted");
+  document.getElementById("tiles").innerHTML = [
+    ["Ever seen", d.funnel.reduce((a, f) => a + f.n, 0), "every posting tracked"],
+    ["Sent", sent, "applications submitted"],
+    ["In play", g("applied") + g("screening") + g("interview"), "awaiting a response"],
+    ["Interviews+", g("interview") + g("offer"), "interview or offer stage"],
+    ["Rejected", g("rejected"), ""],
+    ["Ghosted", g("ghosted"), "no response in 30 days"],
+  ].map(([l, v, s]) => `<div class="tile"><div class="label">${l}</div>
+    <div class="value">${v}</div>${s ? `<div class="sub">${s}</div>` : ""}</div>`).join("");
+}
+
+function renderStatusChips(rowsAll) {
+  const counts = {};
+  for (const r of rowsAll) counts[r.status] = (counts[r.status] || 0) + 1;
+  document.getElementById("status-chips").innerHTML = CHIP_ORDER.map(s => {
+    const n = s ? (counts[s] || 0) : rowsAll.length;
+    if (s && !n && STATUS_FILTER !== s) return "";
+    return `<button class="fchip ${STATUS_FILTER === s ? "on" : ""}" data-status="${s}">
+      ${s ? `<span class="st st-${s}">${s}</span>` : "all"} <b>${n}</b></button>`;
+  }).join("");
+  document.querySelectorAll("#status-chips .fchip").forEach(b => b.onclick = () => {
+    STATUS_FILTER = b.dataset.status;
+    load().catch(() => {});
+  });
+}
+
+function render(data) {
+  DATA = data;
+  const rows = sortRows(data.rows);
+  paintHeaders();
+  renderStatusChips(data.rows);
+  document.getElementById("count").textContent = `${rows.length} shown`;
+  const body = document.getElementById("rows");
+  if (!rows.length) {
+    body.innerHTML = `<tr><td colspan="10" class="empty">no matches</td></tr>`;
+    return;
+  }
+  body.innerHTML = rows.map(r => `
+    <tr class="clickable" data-id="${r.id}" id="app-${r.id}">
+      <td class="mono" title="${r.date_applied ? "date applied" : "first seen"}">${esc(fmt.date(r.date_applied || r.first_seen))}</td>
+      <td><div class="rowtitle"><b>${companyCell(r, data.company_counts)}</b><span>${esc(r.role)}</span></div></td>
+      <td>${r.tier ? `<span class="tier tier-${esc(r.tier)}">${esc(r.tier)}</span>` : "—"}</td>
+      <td class="num">${r.fit_score ?? "—"}</td>
+      <td class="mono">${esc(r.apply_route || "—")}</td>
+      <td title="source: ${esc(r.source)}">${esc(srcLabel(r.source))}</td>
+      <td><span class="st st-${esc(r.status)}">${esc(r.status)}</span>
+        ${r.carried_over ? `<span class="carried"> ×${r.carried_over}</span>` : ""}</td>
+      <td class="mono">${esc(r.salary_posted || "—")}</td>
+      <td class="mono">${esc(fmt.date(r.last_update))}</td>
+      <td class="sub">${esc(r.next_action || "")}</td>
+    </tr>`).join("");
+  body.querySelectorAll("tr.clickable").forEach(tr => tr.onclick = () => toggleDetail(tr));
+}
+
+function detailHTML(d, colspan) {
+  const hist = (d.history || []).map(h =>
+    `<div class="mono" style="padding:2px 0;">${esc(fmt.ts(h.ts))} · ${esc(h.stage)}/${esc(h.action)} ·
+     <span class="o o-${esc(h.outcome)}">${esc(h.outcome)}</span> ${esc(h.reason || "")}</div>`).join("")
+    || `<span class="sub">no log rows yet</span>`;
+  return `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;">
+      <div>
+        <div style="font-size:14px;"><b>${esc(d.company)}</b> — ${esc(d.role)}</div>
+        <div class="sub" style="margin:4px 0;">${esc(d.location || "location n/a")} · ${esc(srcLabel(d.source))}
+          · route ${esc(d.apply_route || "?")} · tier ${esc(d.tier || "—")} · score ${d.fit_score ?? "—"}</div>
+        <div class="sub">first seen ${esc(fmt.date(d.first_seen))} · posted ${esc(d.posted_date || "?")}
+          · applied ${esc(fmt.date(d.date_applied) || "—")} · updated ${esc(fmt.date(d.last_update))}</div>
+        <div style="margin-top:6px;display:flex;gap:10px;flex-wrap:wrap;">
+          ${d.job_url ? `<a href="${encodeURI(d.job_url)}" target="_blank" rel="noopener noreferrer">posting ↗</a>` : ""}
+          ${d.cover_letter_path ? `<a href="/api/application/${d.id}/letter.pdf">cover letter (PDF) ⬇</a>` : ""}
+        </div>
+        <div style="margin-top:8px;white-space:pre-wrap;font-size:12.5px;color:var(--ink-2);">${esc(d.notes || "")}</div>
+      </div>
+      <div><div class="sub" style="margin-bottom:4px;letter-spacing:.5px;">HISTORY</div>${hist}</div>
+    </div>`;
+}
+
+async function toggleDetail(tr) {
+  const was = openDetail && openDetail.dataset.for === tr.dataset.id;
+  if (openDetail) { openDetail.remove(); openDetail = null; }
+  if (was) return;
+  const d = await fetchJSON(`/api/application/${tr.dataset.id}`);
+  const det = document.createElement("tr");
+  det.className = "detail-row";
+  det.dataset.for = tr.dataset.id;
+  det.innerHTML = `<td colspan="10">${detailHTML(d)}</td>`;
+  tr.after(det);
+  openDetail = det;
+}
+
+/* deep link (#app-<id>, from a notification): pin the full record above the
+   table so it's visible regardless of filters, and flash it */
+async function pinFromHash() {
+  const m = location.hash.match(/^#app-(\d+)$/);
+  if (!m) return;
+  try {
+    const d = await fetchJSON(`/api/application/${m[1]}`);
+    const el = document.getElementById("pinned");
+    el.innerHTML = `<div class="panel" style="margin-bottom:12px;">
+      <div class="panel-h"><span class="t">From your notification</span>
+        <span class="m"><a href="#" onclick="document.getElementById('pinned').innerHTML='';return false;">close ✕</a></span></div>
+      <div class="panel-b">${detailHTML(d)}</div></div>`;
+    flashEl(el.firstElementChild);
+  } catch (e) { /* row gone — table search still works */ }
+}
+
+let t = null;
+async function load() {
+  const p = new URLSearchParams();
+  const v = id => document.getElementById(id).value.trim();
+  if (STATUS_FILTER) p.set("status", STATUS_FILTER);
+  if (v("f-tier")) p.set("tier", v("f-tier"));
+  if (v("f-route")) p.set("route", v("f-route"));
+  if (v("f-q")) p.set("q", v("f-q"));
+  openDetail = null;
+  render(await fetchJSON("/api/applications?" + p));
+}
+
+/* ---- Transit network scene ---- */
+let S3D = null;
+async function init3d() {
+  let mod = null;
+  try { mod = await import("/assets/scenes3d.js"); } catch (e) { mod = null; }
+  if (!mod) return;
+  S3D = mod.initPageScene({
+    tools: document.getElementById("scene-tools"),
+    host: document.getElementById("scene3d"),
+    note: document.getElementById("scene-note"),
+    builder: mod.buildPipeline,
+    buildOpts: { onStage: id => {
+      if (!id) return;
+      STATUS_FILTER = STATUS_FILTER === id ? "" : id;
+      load().catch(() => {});
+    } },
+  });
+  if (S3D) syncScene();
+}
+async function syncScene() {
+  if (!S3D) return;
+  try {
+    const d = await fetchJSON("/api/stats");
+    const counts = {};
+    for (const f of d.funnel) counts[f.status] = f.n;
+    S3D.setData(counts);
+  } catch (e) { /* scene sync is best-effort */ }
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  init3d().catch(() => {});
+  skelRows(document.getElementById("rows"), 10, 8);
+  skelTiles(document.getElementById("tiles"), 6);
+  const bad = e => document.getElementById("rows").innerHTML =
+    `<tr><td colspan="10" class="err">failed: ${esc(e.message)}</td></tr>`;
+  load().then(pinFromHash).catch(bad);
+  loadTiles().catch(() => {});
+  document.querySelectorAll("th.sortable").forEach(th => th.onclick = () => {
+    const key = th.dataset.sort;
+    if (SORT.key === key) SORT.dir = -SORT.dir;
+    else SORT = { key, dir: (key === "date_applied" || key === "last_update" || key === "fit_score") ? -1 : 1 };
+    try { localStorage.setItem("apps-sort", JSON.stringify(SORT)); } catch (e) {}
+    if (DATA) { openDetail = null; render(DATA); }
+  });
+  for (const id of ["f-tier", "f-route"])
+    document.getElementById(id).onchange = () => load().catch(() => {});
+  document.getElementById("f-q").oninput = () => {
+    clearTimeout(t);
+    t = setTimeout(() => load().catch(() => {}), 250);
+  };
+  window.addEventListener("hashchange", pinFromHash);
+});
+</script>
+</body>
+</html>

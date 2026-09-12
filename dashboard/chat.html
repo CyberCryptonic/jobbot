@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0B0B0A">
+<title>JobBot · Operator Console</title>
+<link rel="stylesheet" href="/assets/style.css">
+<script type="importmap">{"imports":{"three":"/assets/vendor/three.module.min.js"}}</script>
+<script src="/assets/app.js" defer></script>
+<style>
+  #pins { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+  .pin { border: 1px solid var(--border); border-radius: 8px; padding: 9px 11px; font-size: 13px; background: var(--surface); }
+  .pin .h { font: 11px var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 4px; }
+  .pin .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 4px 0; }
+  .pin .row .txt { flex: 1; min-width: 200px; }
+  .pin.proposal { border-color: rgba(250, 178, 25, 0.5); border-left-width: 3px; }
+  .pin.paused { border-color: rgba(208, 59, 59, 0.6); border-left-width: 3px; }
+  .pin pre { white-space: pre-wrap; font: 12px var(--mono); color: var(--ink-2); margin: 4px 0 6px; max-height: 220px; overflow: auto; }
+  .msg .audit { display: block; font: 10.5px var(--mono); color: var(--muted); margin-top: 4px; }
+  .msg .audit b { color: var(--ink-2); font-weight: 600; }
+</style>
+</head>
+<body data-page="chat">
+<main id="main">
+  <header class="pagehead">
+    <h1>Operator Console <small>talk to the pipeline</small></h1>
+    <p class="sub">Ask why a job was skipped, what ran today, or tell it to change something.
+      Any real state change comes back as a proposal you Confirm first — nothing applies on words alone.</p>
+  </header>
+  <div class="chat-grid">
+    <section style="min-width:0;">
+      <div id="chatsearch">
+        <input type="search" id="msgsearch" placeholder="Search this conversation…" aria-label="Search messages">
+        <span class="sub mono" id="msgsearch-n"></span>
+      </div>
+      <div id="thread"><div class="empty">loading…</div></div>
+      <div id="busy"></div>
+      <button id="jump" class="small" hidden aria-label="Jump to the latest message">↓ Latest</button>
+      <div id="composer">
+        <textarea id="input" placeholder="Message the pipeline… (Enter to send, Shift+Enter for newline)" aria-label="Message the pipeline"></textarea>
+        <button class="primary" id="send">Send</button>
+      </div>
+    </section>
+    <aside aria-label="Context">
+      <div id="copilot3d" class="ops3d-host loading" data-scene="copilot"
+           style="min-height:190px;border:1px solid var(--line);border-radius:12px;margin-bottom:12px;"><div class="scene-loading" role="status"><span class="sl-ring" aria-hidden="true"></span><span>Initializing spatial view…</span></div></div>
+      <div class="microcap" style="margin:2px 0 9px;">Live context</div>
+      <div id="pins"></div>
+      <button class="small" id="newsession" title="chatd forgets earlier messages; the log keeps them">New session</button>
+    </aside>
+  </div>
+</main>
+
+<script>
+"use strict";
+/* Send -> POST /api/chat (writes chat_messages + a pending command).
+   chatd polls commands every 3s and writes the reply; we poll every 2.5s.
+   Pins above the thread come from the same poll: pending proposals (the
+   Confirm button just sends the literal text "confirm N" as a message, which
+   chatd applies in plain code), unsent email drafts (Send = the only path
+   that emails anyone), open answer gaps, and the pause flag.
+   All content renders via textContent — never innerHTML with DB text. */
+
+let lastId = 0;
+let firstLoad = true;
+
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+}
+
+let lastMeta = null;                           // {role, ts, day} of the previous message
+function addMsg(m) {
+  const thread = document.getElementById("thread");
+  const day = (m.ts || "").slice(0, 10);
+  if (day && (!lastMeta || lastMeta.day !== day)) {
+    const d = new Date(day + "T12:00:00");
+    thread.appendChild(el("div", "day-sep",
+      d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })));
+  }
+  const grouped = lastMeta && lastMeta.role === m.role && lastMeta.day === day &&
+    Math.abs(new Date(m.ts) - new Date(lastMeta.ts)) < 5 * 60 * 1000;
+  const div = el("div", "msg " + m.role + (grouped ? " grp" : ""), m.content);
+  lastMeta = { role: m.role, ts: m.ts, day };
+  if (m.tool_calls) {
+    try {
+      const calls = JSON.parse(m.tool_calls);
+      const a = el("span", "audit");
+      a.textContent = "tools: ";
+      calls.forEach((c, i) => {
+        const b = el("b", null, c.tool);
+        a.appendChild(b);
+        let extra = "";
+        if (c.returned != null) extra = ` ${c.returned} rows`;
+        if (c.proposal_id) extra = ` → proposal #${c.proposal_id}`;
+        if (c.draft_id) extra = ` → draft #${c.draft_id}`;
+        if (c.error) extra = ` ✗ ${c.error}`;
+        a.appendChild(document.createTextNode(extra + (i < calls.length - 1 ? " · " : "")));
+      });
+      div.appendChild(a);
+    } catch (e) { /* audit is optional */ }
+  }
+  div.appendChild(el("span", "t", fmt.ts(m.ts)));
+  document.getElementById("thread").appendChild(div);
+}
+
+async function sendText(text) {
+  await post("/api/chat", { message: text });
+  await poll();
+}
+
+function renderPins(d) {
+  const pins = document.getElementById("pins");
+  pins.innerHTML = "";
+  if (d.paused) {
+    const p = el("div", "pin paused");
+    p.appendChild(el("div", "h", "pipeline paused"));
+    p.appendChild(el("div", null, `since ${d.paused.since || "?"} — ${d.paused.reason || ""}. Say "resume the pipeline" to propose a resume.`));
+    pins.appendChild(p);
+  }
+  if (d.proposals && d.proposals.length) {
+    const p = el("div", "pin proposal");
+    p.appendChild(el("div", "h", `${d.proposals.length} proposed change${d.proposals.length > 1 ? "s" : ""} waiting for you`));
+    for (const pr of d.proposals) {
+      const row = el("div", "row");
+      row.appendChild(el("span", "txt", `#${pr.id} ${pr.tool}: ${pr.summary}`));
+      const ok = el("button", "primary small", `Confirm ${pr.id}`);
+      ok.onclick = () => { ok.disabled = true; sendText(`confirm ${pr.id}`).catch(e => alert(e.message)); };
+      const no = el("button", "small", "Cancel");
+      no.onclick = () => { no.disabled = true; sendText(`cancel ${pr.id}`).catch(e => alert(e.message)); };
+      row.appendChild(ok); row.appendChild(no);
+      p.appendChild(row);
+    }
+    pins.appendChild(p);
+  }
+  if (d.drafts && d.drafts.length) {
+    for (const dr of d.drafts) {
+      const p = el("div", "pin");
+      p.appendChild(el("div", "h", `email draft #${dr.id} — not sent`));
+      p.appendChild(el("div", null, `To: ${dr.to_addr}`));
+      p.appendChild(el("div", null, `Subject: ${dr.subject}`));
+      p.appendChild(el("pre", null, dr.body));
+      const row = el("div", "row");
+      const send = el("button", "primary small", "Send from my address");
+      send.onclick = async () => {
+        if (!confirm(`Send this email to ${dr.to_addr} now?`)) return;
+        send.disabled = true;
+        try { await post(`/api/drafts/${dr.id}/send`); await poll(); }
+        catch (e) { send.disabled = false; alert(e.message); }
+      };
+      const disc = el("button", "small", "Discard");
+      disc.onclick = async () => { disc.disabled = true; try { await post(`/api/drafts/${dr.id}/discard`); await poll(); } catch (e) { alert(e.message); } };
+      const cp = el("button", "small", "Copy body");
+      cp.onclick = () => copyText(dr.body, cp);
+      row.appendChild(send); row.appendChild(cp); row.appendChild(disc);
+      p.appendChild(row);
+      pins.appendChild(p);
+    }
+  }
+  if (d.gaps && d.gaps.length) {
+    const p = el("div", "pin");
+    p.appendChild(el("div", "h", `${d.gaps.length} answer gap${d.gaps.length > 1 ? "s" : ""} open — screening questions the answer file could not cover`));
+    for (const g of d.gaps.slice(0, 5)) {
+      const row = el("div", "row");
+      row.appendChild(el("span", "txt", `#${g.id} (${g.times_seen}×) ${g.question}`));
+      const b = el("button", "small", "Answer");
+      b.onclick = () => {
+        const inp = document.getElementById("input");
+        inp.value = `Answer gap #${g.id}: `;
+        inp.focus();
+      };
+      row.appendChild(b);
+      p.appendChild(row);
+    }
+    if (d.gaps.length > 5) p.appendChild(el("div", null, `…and ${d.gaps.length - 5} more; ask "list the open answer gaps".`));
+    pins.appendChild(p);
+  }
+}
+
+/* ---- Copilot core (small state scene; no fake activity) ---- */
+let S3D = null;
+async function initCopilot3d() {
+  const host = document.getElementById("copilot3d");
+  const done = ok => {
+    const l = host.querySelector(".scene-loading");
+    if (l) l.remove();
+    host.classList.remove("loading");
+    if (!ok) host.classList.add("hide");
+  };
+  if (window.innerWidth <= 900) return done(false);
+  let mod = null;
+  try { mod = await import("/assets/scenes3d.js"); } catch (e) { return done(false); }
+  if (!mod.supportsWebGL()) return done(false);
+  const built = mod.buildCopilot(host);
+  if (!built) return done(false);
+  done(true);
+  host.classList.remove("hide");
+  built.scene._resize();
+  S3D = built;
+}
+
+async function poll() {
+  const d = await fetchJSON("/api/chat?after=" + lastId);
+  if (S3D) S3D.setState({ busy: d.busy, proposals: (d.proposals || []).length });
+  if (firstLoad) {
+    document.getElementById("thread").innerHTML = "";
+    lastMeta = null;
+    firstLoad = false;
+    if (!d.messages.length) {
+      const e = el("div", "empty", "No messages yet. Ask what ran today, why a job was skipped, or answer a gap.");
+      e.id = "thread-empty";
+      document.getElementById("thread").appendChild(e);
+    }
+  }
+  if (d.messages.length) {
+    const empty = document.getElementById("thread-empty");
+    if (empty) empty.remove();
+    const nearBottom = window.innerHeight + window.scrollY >= document.body.scrollHeight - 320;
+    for (const m of d.messages) { addMsg(m); lastId = m.id; }
+    applySearch();
+    // never yank the view away from something you're reading
+    if (nearBottom || document.body.scrollHeight <= window.innerHeight) window.scrollTo(0, document.body.scrollHeight);
+  }
+  renderPins(d);
+  document.getElementById("busy").textContent = d.busy ? "agent working…" : "";
+}
+
+async function send() {
+  const input = document.getElementById("input");
+  const text = input.value.trim();
+  if (!text) return;
+  const btn = document.getElementById("send");
+  btn.disabled = true;
+  try {
+    await sendText(text);
+    input.value = "";
+  } catch (e) {
+    alert("send failed: " + e.message);
+  } finally {
+    btn.disabled = false;
+    input.focus();
+  }
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  initCopilot3d().catch(() => {});
+  poll().catch(e => document.getElementById("thread").innerHTML =
+    `<div class="err">chat failed to load: ${esc(e.message)}</div>`);
+  setInterval(() => poll().catch(() => {}), 2500);
+  document.getElementById("send").onclick = send;
+  document.getElementById("newsession").onclick = async () => {
+    await post("/api/chat/reset"); await poll();
+  };
+  document.getElementById("input").addEventListener("keydown", e => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+  });
+  // jump-to-latest shows whenever you've scrolled up into history
+  const jump = document.getElementById("jump");
+  addEventListener("scroll", () => {
+    jump.hidden = window.innerHeight + window.scrollY >= document.body.scrollHeight - 320;
+  }, { passive: true });
+  jump.onclick = () => window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+  document.getElementById("msgsearch").addEventListener("input", applySearch);
+});
+
+function applySearch() {
+  const q = (document.getElementById("msgsearch").value || "").trim().toLowerCase();
+  const msgs = document.querySelectorAll("#thread .msg");
+  let hits = 0;
+  msgs.forEach(m => {
+    const hit = !q || m.textContent.toLowerCase().includes(q);
+    m.hidden = !hit;
+    if (q && hit) hits++;
+  });
+  document.querySelectorAll("#thread .day-sep").forEach(s => { s.hidden = !!q; });
+  document.getElementById("msgsearch-n").textContent =
+    q ? `${hits} match${hits === 1 ? "" : "es"}` : "";
+}
+</script>
+</body>
+</html>

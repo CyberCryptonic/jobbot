@@ -1,0 +1,10 @@
+{
+  "_comment": "Copy to targets.json (gitignored) and list the companies you actually want to work for. ATS/company career endpoints for the companies source. type is the ATS platform: greenhouse | lever | ashby | workday | oracle | statejobsny. token is the company's slug on that platform (find it in the careers-page URL). title_filter is a case-insensitive regex applied to posting titles; wide boards need one, small security shops can omit it and take everything. The self-building list (answer file J: employers scoring >70) appends here with added_by:'auto'.",
+  "title_filter_default": "secur|cyber|soc |soc-|network|threat|incident|infosec|information technology|help desk|desktop support|systems admin|sysadmin|it analyst|it specialist|noc |grc|penetration|vulnerab",
+  "targets": [
+    { "type": "greenhouse", "company": "Example Security Co", "token": "examplesecurityco" },
+    { "type": "lever", "company": "Example Labs", "token": "example-labs" },
+    { "type": "ashby", "company": "Example Networks", "token": "example-networks" },
+    { "type": "workday", "company": "Example Corp", "tenant": "examplecorp", "host": "wd1", "site": "ExternalCareers", "title_filter": "secur|cyber|network" }
+  ]
+}

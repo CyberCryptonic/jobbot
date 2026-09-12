@@ -1,0 +1,706 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0B0B0A">
+<title>JobBot · Network Operations</title>
+<link rel="stylesheet" href="/assets/style.css">
+<script type="importmap">{"imports":{"three":"/assets/vendor/three.module.min.js"}}</script>
+<script src="/assets/vendor/chart.umd.min.js" defer></script>
+<script src="/assets/app.js" defer></script>
+<script src="/assets/charts.js" defer></script>
+</head>
+<body data-page="agent">
+<main id="main">
+  <header class="pagehead">
+    <h1>Agent Mesh <small>the orchestration floor</small></h1>
+    <p class="sub">Eight agents move every job from discovery to submission and read every reply.
+      The mesh shows the real state of each one — a line only flows while work is actually moving.
+      The log underneath answers "why did it do that" for every single decision, weeks later.</p>
+  </header>
+
+  <section class="panel" id="mesh-panel">
+    <div id="mesh-tools">
+      <span class="microcap" style="margin-right:4px;">State</span>
+      <div class="fchips" style="margin:0;" id="state-chips" role="group" aria-label="Filter agents by state"></div>
+      <span style="flex:1"></span>
+      <span class="scene-tools" id="scene-tools"></span>
+    </div>
+    <div id="scene3d" class="ops3d-host loading" data-scene="agents" style="min-height:520px;"><div class="scene-loading" role="status"><span class="sl-ring" aria-hidden="true"></span><span>Initializing spatial view…</span></div></div>
+    <div class="replay-bar hide" id="replay-bar">
+      <span class="microcap">Replay</span>
+      <select id="replay-run" aria-label="Choose a past run to replay"><option value="">choose a run…</option></select>
+      <input id="replay-app" type="text" inputmode="numeric" placeholder="or job #id" aria-label="Follow one application by id" style="width:110px;min-height:31px;">
+      <button class="small" id="replay-go">Replay</button>
+      <button class="small" id="replay-playpause" aria-pressed="false">⏯</button>
+      <input type="range" id="replay-scrub" min="0" max="0" value="0" aria-label="Replay position">
+      <span class="mono sub" id="replay-pos"></span>
+      <select id="replay-speed" aria-label="Replay speed">
+        <option value="1">1×</option><option value="2" selected>2×</option><option value="5">5×</option>
+      </select>
+      <button class="small" id="replay-live">← Back to live</button>
+    </div>
+    <div id="mesh">
+      <svg id="mesh-edges" preserveAspectRatio="none" aria-hidden="true"></svg>
+      <div id="core" aria-hidden="true"></div>
+      <div class="pods-flow" id="pods"></div>
+    </div>
+    <div class="mesh-list hide tbl-wrap" id="mesh-list"></div>
+    <div class="scene-fallback-note hide" id="scene-note"></div>
+    <div id="inspect"></div>
+  </section>
+
+  <div class="grid2" style="margin-top:16px;">
+    <section class="panel">
+      <div class="panel-h"><span class="t">Cost per agent — this month</span><span class="m" id="cost-note"></span></div>
+      <div class="panel-b"><div class="chart-box" style="height:210px;"><canvas id="ch-agentcost" role="img" aria-label="Horizontal bar chart of month-to-date cost per agent"></canvas></div>
+      <p class="sub" id="cost-summary" style="margin-top:8px;"></p></div>
+    </section>
+    <section class="panel">
+      <div class="panel-h"><span class="t">Submission head — safety ramp</span></div>
+      <div class="panel-b" id="head-box"><div class="skel" style="height:130px"></div></div>
+    </section>
+  </div>
+
+  <h2>Run timeline <small>— last 7 days (tap a run to filter the log)</small></h2>
+  <section class="panel timeline"><div id="tl" class="tl-grid"><div class="skel" style="height:120px;grid-column:1/-1;"></div></div></section>
+
+  <h2>Decision log <small>— every action, searchable</small></h2>
+  <details class="about"><summary>How to read this</summary>
+    <div class="body"><p>One row per decision any agent made: what it acted on, what happened, and the
+    one-sentence why. Filter by agent, outcome, or date, or free-text search subjects and reasons.
+    Tap a row for run id, token cost, and raw detail. This is the "why didn't it apply to that one"
+    answer machine.</p></div>
+  </details>
+  <div class="filters">
+    <select id="f-stage" aria-label="Filter by agent">
+      <option value="">agent: all</option>
+      <option>discovery</option><option>scoring</option><option>materials</option>
+      <option>submission</option><option>inbox</option><option>followup</option>
+      <option>report</option><option>chat</option><option>ui</option><option>system</option>
+    </select>
+    <select id="f-outcome" aria-label="Filter by outcome">
+      <option value="">outcome: all</option>
+      <option>ok</option><option>skip</option><option>warn</option>
+      <option>fail</option><option>flag</option>
+    </select>
+    <input type="date" id="f-date" aria-label="Filter by date">
+    <input type="search" id="f-q" placeholder="Search subject, reason, detail…" aria-label="Search the decision log">
+    <button class="small" id="f-clear">Clear</button>
+    <span id="run-filter"></span>
+  </div>
+  <section class="panel tbl-wrap" style="max-height:60vh;overflow-y:auto;">
+    <table>
+      <thead><tr>
+        <th>Time</th><th>Agent</th><th>Action</th><th>Subject</th><th>Outcome</th>
+        <th>Reason</th><th class="num">ms</th><th class="num">Tokens</th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </section>
+</main>
+
+<script>
+"use strict";
+const STAGE_ORDER = ["discovery","scoring","materials","submission","inbox",
+                     "followup","report","chat","ui","system"];
+let runFilter = null, openDetail = null, AGENTS = null, selected = null;
+let stateFilter = "all", listMode = false;
+
+/* ---- mesh topology (composition is asymmetric; size = role weight) ----- */
+
+const POS = {
+  boards:     { x: 6,  y: 22, ext: "Job boards & feeds", sub: "sources" },
+  discovery:  { x: 20, y: 15, w: 192, cluster: "acquire" },
+  scoring:    { x: 30, y: 44, w: 168, cluster: "acquire" },
+  materials:  { x: 51, y: 15, w: 178, cluster: "produce" },
+  submission: { x: 71, y: 25, w: 204, cluster: "execute" },
+  employers:  { x: 94, y: 44, ext: "Employers / ATS", sub: "receiving end" },
+  inbox:      { x: 77, y: 64, w: 178, cluster: "sense" },
+  followup:   { x: 89, y: 82, w: 150, cluster: "sense" },
+  report:     { x: 55, y: 84, w: 160, cluster: "interface" },
+  chat:       { x: 33, y: 80, w: 168, cluster: "interface" },
+  you:        { x: 7,  y: 64, ext: "You", sub: "" },
+};
+const CLUSTERS = [["ACQUIRE", 13, 6], ["PRODUCE", 46, 4], ["EXECUTE", 68, 8],
+                  ["SENSE", 88, 56], ["INTERFACE", 42, 93]];
+const FLOWS = [
+  ["boards", "discovery"], ["discovery", "scoring"], ["scoring", "materials"],
+  ["materials", "submission"], ["submission", "employers"],
+  ["employers", "inbox"], ["inbox", "followup"], ["followup", "employers"],
+  ["report", "you"], ["chat", "you"],
+];
+const SPOKES = ["discovery","scoring","materials","submission","inbox","followup","report","chat"];
+
+function podState(a) {
+  const today = new Date().toISOString().slice(0, 10);
+  if (a.running) return "running";
+  if (a.stage === "submission" && AGENTS.head.enabled && AGENTS.head.awaiting_review) return "blocked";
+  if (a.last && a.last.outcome === "fail") return "fail";
+  if (a.always_on) return "okday";
+  if (a.last && a.last.ts.slice(0, 10) === today && a.last.outcome === "ok") return "okday";
+  return "idle";
+}
+function stateLine(a, st) {
+  if (st === "running") return "working right now";
+  if (st === "blocked") return "HOLDING — awaiting your review";
+  if (st === "fail") return `failed · ${a.last.reason || "see log"}`;
+  if (a.always_on) return "always on — listening";
+  return a.last ? `ran ${fmt.ts(a.last.ts)} · ${a.last.outcome}` : "idle — waiting for its schedule";
+}
+function matchesFilter(st) {
+  if (stateFilter === "all") return true;
+  if (stateFilter === "running") return st === "running";
+  if (stateFilter === "attention") return st === "fail" || st === "blocked";
+  return st === "idle" || st === "okday";
+}
+
+function podHTML(a) {
+  const p = POS[a.stage];
+  const st = podState(a);
+  const dimmed = !matchesFilter(st) || (selected && selected !== a.stage);
+  const cost = a.spend.today > 0 ? ` · <span class="cost">$${a.spend.today.toFixed(2)} today</span>` : "";
+  const backlog = a.backlog ? `<div class="bkl">▲ ${a.backlog} waiting for it</div>` : "";
+  const label = `${a.name}: ${stateLine(a, st)}. ${fmt.int(a.today.metric)} ${a.today.metric_label} today.` +
+    (a.backlog ? ` Backlog ${a.backlog}.` : "") +
+    (a.spend.today ? ` Cost $${a.spend.today.toFixed(2)} today.` : "");
+  return `<button class="pod ${st} ${selected === a.stage ? "sel" : ""} ${dimmed ? "dim" : ""}"
+      data-stage="${a.stage}" style="--podw:${p.w}px;left:${p.x}%;top:${p.y}%;"
+      aria-pressed="${selected === a.stage}" aria-label="${esc(label)}">
+    <span class="nm"><span class="d" aria-hidden="true"></span>${esc(a.name)}</span>
+    <span class="rl">${esc(p.cluster)}</span>
+    <span class="stl">${esc(stateLine(a, st))}</span>
+    <span class="met"><b>${fmt.int(a.today.metric)}</b> ${esc(a.today.metric_label)} today${cost}</span>
+    ${backlog}
+  </button>`;
+}
+
+function extHTML(id) {
+  const p = POS[id];
+  const sub = id === "you"
+    ? `${AGENTS.queue_count} card${AGENTS.queue_count === 1 ? "" : "s"} in your queue`
+    : p.sub;
+  return `<div class="pod ext" style="left:${p.x}%;top:${p.y}%;" aria-hidden="true">
+    <span class="nm">${esc(p.ext)}</span>${sub ? `<span class="stl">${esc(sub)}</span>` : ""}</div>`;
+}
+
+/* ---- the Core instrument (three real gauges + the state word) ---------- */
+
+function arc(r, frac, cls) {
+  const C = 2 * Math.PI * r;
+  const v = Math.max(0, Math.min(1, frac));
+  return `<circle class="core-arc-bg" cx="110" cy="110" r="${r}" stroke-width="7"/>
+    <circle class="core-arc ${cls}" cx="110" cy="110" r="${r}" stroke-width="7"
+      stroke-dasharray="${(C * v).toFixed(1)} ${(C * (1 - v)).toFixed(1)}"
+      transform="rotate(-90 110 110)"/>`;
+}
+function renderCore() {
+  const c = AGENTS.core;
+  const applied = c.daily_target ? c.applied_today_auto / c.daily_target : 0;
+  const spendF = c.cap ? c.spend_mtd / c.cap : 0;
+  const queueF = c.queue_cap ? c.queue_count / c.queue_cap : 0;
+  const cls = f => f >= 1 ? "over" : f >= 0.8 ? "hot" : "";
+  const ticks = [0, 0.25, 0.5, 0.75].map(t => {
+    const a = -Math.PI / 2 + t * 2 * Math.PI;
+    return `<line class="core-tick" x1="${110 + 96 * Math.cos(a)}" y1="${110 + 96 * Math.sin(a)}"
+      x2="${110 + 101 * Math.cos(a)}" y2="${110 + 101 * Math.sin(a)}" stroke-width="1.5"/>`;
+  }).join("");
+  document.getElementById("core").innerHTML = `
+    <svg width="220" height="220" viewBox="0 0 220 220">${ticks}
+      ${arc(92, applied, cls(applied))}${arc(78, spendF, cls(spendF))}${arc(64, queueF, cls(queueF))}
+      <text class="state-t ${c.state === "PAUSED" || c.state === "REVIEW HOLD" ? "paused" : ""}"
+        x="110" y="107" text-anchor="middle">${esc(c.state)}</text>
+      <text class="jobs-t" x="110" y="124" text-anchor="middle">${fmt.int(AGENTS.totals.applications)} jobs tracked</text>
+    </svg>
+    <div class="legend">
+      <span class="v">${c.applied_today_auto}/${c.daily_target}</span> auto-applied today ·
+      <span class="v">$${c.spend_mtd.toFixed(2)}/$${c.cap}</span> month<br>
+      <span class="v">${c.queue_count}/${c.queue_cap}</span> queue pressure
+    </div>`;
+}
+
+/* ---- edges: animate ONLY in-flight work -------------------------------- */
+
+function edgeClass(stage) {
+  const a = AGENTS.agents.find(x => x.stage === stage);
+  if (!a) return "";
+  if (a.running) return "live";
+  const today = new Date().toISOString().slice(0, 10);
+  if (a.last && a.last.ts.slice(0, 10) === today) return "today";
+  return "";
+}
+function center(idOrStage) {
+  const el = document.querySelector(`.pod[data-stage="${idOrStage}"]`) ||
+    [...document.querySelectorAll(".pod.ext")].find(e => e.style.left === POS[idOrStage].x + "%");
+  const wrap = document.getElementById("mesh");
+  if (!el || !wrap) return null;
+  const a = el.getBoundingClientRect(), b = wrap.getBoundingClientRect();
+  return { x: a.left + a.width / 2 - b.left, y: a.top + a.height / 2 - b.top };
+}
+function drawEdges() {
+  const svg = document.getElementById("mesh-edges");
+  const wrap = document.getElementById("mesh");
+  if (!svg || !wrap || !AGENTS || listMode || wrap.clientWidth < 900) { if (svg) svg.innerHTML = ""; return; }
+  svg.setAttribute("viewBox", `0 0 ${wrap.clientWidth} ${wrap.clientHeight}`);
+  const coreC = { x: wrap.clientWidth / 2, y: wrap.clientHeight / 2 };
+  const curve = (p, q, sag = 0) =>
+    `M ${p.x} ${p.y} Q ${(p.x + q.x) / 2} ${(p.y + q.y) / 2 + sag} ${q.x} ${q.y}`;
+  let out = "";
+  for (const [a, b] of FLOWS) {
+    const p = center(a), q = center(b);
+    if (!p || !q) continue;
+    const cls = edgeClass(SPOKES.includes(a) ? a : b) || edgeClass(SPOKES.includes(b) ? b : a);
+    out += `<path class="${cls}" d="${curve(p, q, 12)}"/>`;
+  }
+  for (const s of SPOKES) {
+    const p = center(s);
+    if (!p) continue;
+    out += `<path class="${edgeClass(s) === "live" ? "live" : ""}" style="opacity:.4" d="${curve(p, coreC, 8)}"/>`;
+  }
+  svg.innerHTML = out;
+}
+
+/* ---- rendering: mesh / list / inspection ------------------------------- */
+
+function renderMesh() {
+  const pods = document.getElementById("pods");
+  const wide = document.getElementById("mesh").clientWidth >= 900 && window.innerWidth > 900;
+  let html = "";
+  if (wide) {
+    html += CLUSTERS.map(([n, x, y]) =>
+      `<span class="cluster-label" style="left:${x}%;top:${y}%">${n}</span>`).join("");
+    html += Object.keys(POS).filter(k => POS[k].ext).map(extHTML).join("");
+  }
+  const order = wide ? AGENTS.agents
+    : [...AGENTS.agents].sort((a, b) => Object.keys(POS).indexOf(a.stage) - Object.keys(POS).indexOf(b.stage));
+  html += order.map(podHTML).join("");
+  pods.innerHTML = html;
+  pods.querySelectorAll(".pod[data-stage]").forEach(el => el.onclick = () => selectPod(el.dataset.stage));
+  document.getElementById("core").style.display = wide ? "" : "none";
+  renderCore();
+  drawEdges();
+}
+
+function renderList() {
+  const el = document.getElementById("mesh-list");
+  el.innerHTML = `<table>
+    <thead><tr><th>Agent</th><th>State</th><th>Last run</th><th class="num">Today</th>
+      <th class="num">Backlog</th><th class="num">Cost today</th><th class="num">Cost MTD</th></tr></thead>
+    <tbody>${AGENTS.agents.map(a => {
+      const st = podState(a);
+      return `<tr class="clickable" data-stage="${a.stage}">
+        <td><div class="rowtitle"><b>${esc(a.name)}</b><span>${esc(a.purpose)}</span></div></td>
+        <td><span class="o o-${st === "running" ? "running" : st === "fail" ? "fail" : st === "blocked" ? "warn" : st === "okday" ? "ok" : "skip"}">${st === "okday" ? "ok" : st}</span></td>
+        <td class="mono">${a.last ? esc(fmt.ts(a.last.ts)) : "—"}</td>
+        <td class="num">${fmt.int(a.today.metric)} ${esc(a.today.metric_label)}</td>
+        <td class="num">${a.backlog ?? "—"}</td>
+        <td class="num">$${a.spend.today.toFixed(2)}</td>
+        <td class="num">$${a.spend.mtd.toFixed(2)}</td>
+      </tr>`;
+    }).join("")}</tbody></table>`;
+  el.querySelectorAll("tr.clickable").forEach(tr => tr.onclick = () => selectPod(tr.dataset.stage));
+}
+
+function selectPod(stage) {
+  selected = selected === stage ? null : stage;
+  renderMesh();
+  if (listMode) renderList();
+  renderInspect();
+  if (SCENE3D && viewMode === "scene") SCENE3D.scene.select(selected, { silent: true });
+  if (selected) {
+    document.getElementById("f-stage").value = selected;
+    loadLog().catch(() => {});
+  }
+}
+
+async function renderInspect() {
+  const el = document.getElementById("inspect");
+  if (!selected || !AGENTS) { el.innerHTML = ""; return; }
+  const a = AGENTS.agents.find(x => x.stage === selected);
+  if (!a) { el.innerHTML = ""; return; }
+  const st = podState(a);
+  const sched = a.always_on ? "Always on — a daemon polling chat every 3 seconds."
+    : a.next_at ? `Next run ${fmt.ts(a.next_at)}.` : "Runs inside another agent's schedule.";
+  el.innerHTML = `<div class="irow">
+    <div class="icol">
+      <div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;">
+        <b style="color:var(--ink);font-size:15px;">${esc(a.name)}</b>
+        <span class="o o-${st === "running" ? "running" : st === "fail" ? "fail" : st === "blocked" ? "warn" : "ok"}">${st === "okday" ? "ok" : st}</span>
+        <button class="small ghost" id="insp-close" aria-label="Back to mesh">✕ back to mesh</button>
+      </div>
+      <p class="sub" style="margin-top:5px;max-width:520px;">${esc(a.purpose)}. ${esc(sched)}</p>
+      ${a.last ? `<p class="sub" style="margin-top:6px;">Last run ${esc(fmt.ts(a.last.ts))} —
+        <span class="o o-${esc(a.last.outcome)}">${esc(a.last.outcome)}</span>
+        ${esc(fmt.ms(a.last.duration_ms))} · ${fmt.tokens(a.last.tokens)} tokens
+        ${a.last.reason ? " · " + esc(a.last.reason) : ""}</p>` : ""}
+      <p class="mono" style="font-size:12px;margin-top:8px;color:var(--ink-2);">
+        today: <b style="color:var(--ink)">${fmt.int(a.today.metric)}</b> ${esc(a.today.metric_label)}
+        · ${a.today.decisions} decisions · ${a.today.fails} fails
+        ${a.backlog != null ? ` · backlog ${a.backlog}` : ""}<br>
+        spend: $${a.spend.today.toFixed(2)} today · $${a.spend.mtd.toFixed(2)} this month</p>
+      <p class="sub" style="margin-top:8px;">Changes to how it behaves go through
+        <a href="/chat">Copilot</a> as confirm-first proposals — nothing here mutates state.</p>
+    </div>
+    <div class="icol">
+      <div class="microcap" style="margin-bottom:7px;">Latest decisions</div>
+      <div class="logmini" id="insp-log"><div class="skel" style="height:80px"></div></div>
+      <button class="small" style="margin-top:9px;" id="insp-loglink">Filter the full log ↓</button>
+    </div>
+  </div>`;
+  document.getElementById("insp-close").onclick = () => selectPod(selected);
+  document.getElementById("insp-loglink").onclick = () => {
+    document.getElementById("rows").scrollIntoView({ behavior: "smooth" });
+  };
+  try {
+    const d = await fetchJSON(`/api/activity?stage=${a.stage}&limit=8`);
+    document.getElementById("insp-log").innerHTML = d.rows.map(r =>
+      `<div>${esc(fmt.ts(r.ts))} · ${esc(r.action)} · <span class="o o-${esc(r.outcome)}">${esc(r.outcome)}</span>
+       ${esc((r.subject || r.reason || "").slice(0, 60))}</div>`).join("") || `<span class="sub">no rows</span>`;
+  } catch (e) { /* mini log is best-effort */ }
+}
+
+function renderStateChips() {
+  const defs = [["all", "All"], ["running", "Running"], ["attention", "Needs attention"], ["idle", "Quiet"]];
+  document.getElementById("state-chips").innerHTML = defs.map(([v, l]) =>
+    `<button class="fchip ${stateFilter === v ? "on" : ""}" data-sf="${v}" aria-pressed="${stateFilter === v}">${l}</button>`).join("");
+  document.querySelectorAll("[data-sf]").forEach(b => b.onclick = () => {
+    stateFilter = b.dataset.sf;
+    renderStateChips();
+    renderMesh();
+    if (SCENE3D) { SCENE3D.scene._paintStates(); SCENE3D.scene.requestRender(); }
+  });
+}
+
+function renderHead() {
+  const h = AGENTS.head;
+  const el = document.getElementById("head-box");
+  if (!h.enabled) {
+    el.innerHTML = `<div class="sub">Auto-submit head is off — every ats/direct job hands off to Jobright.</div>`;
+    return;
+  }
+  const state = h.awaiting_review
+    ? `<span class="pill warn">HOLDING · awaiting your review</span>`
+    : h.dry_run ? `<span class="pill warn">DRY RUN</span>` : `<span class="pill ok">LIVE</span>`;
+  el.innerHTML = `
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">${state}
+      <span class="mono" style="font-size:13px;">live sends ${h.live_count}/${h.verify_first_n}</span>
+      <span class="mono sub">today ${h.clicks_today}/${h.daily_target} target</span></div>
+    <div class="sub" style="margin:9px 0 0;line-height:1.6;">The head fills real employer forms and clicks
+      submit on its own (Greenhouse only). During its first ${h.verify_first_n} live sends it screenshots
+      every form and stops after each send until you review — the safety ramp, not a malfunction.</div>
+    ${h.awaiting_review ? `<div class="sub" style="margin-top:8px;">After reviewing the screenshots on
+      <a href="/submissions#review">Launch History</a>, resume with:
+      <span class="mono" style="color:var(--ink-2)">./venv/bin/python submission.py --reviewed</span></div>` : ""}
+    ${h.human_verify_gates.length ? `<div class="sub" style="margin-top:8px;">Learned human-verification
+      walls (never clicked again, pre-routed to you): <span class="mono">${h.human_verify_gates.map(esc).join(", ")}</span></div>` : ""}
+    ${h.last_live ? `<div class="sub" style="margin-top:8px;">Last live send ${esc(fmt.ts(h.last_live))}</div>` : ""}`;
+}
+
+let costChart = null;
+
+/* ---- 3D: Holographic Network Operations Table (progressive enhancement) -- */
+let SCENE3D = null, FEED = null, TOOLS = null, TOUR = null, viewMode = "schematic";
+const AGENT_IDS = new Set(STAGE_ORDER.slice(0, 8));
+
+function setViewMode(m) {
+  viewMode = m;
+  document.getElementById("scene3d").classList.toggle("hide", m !== "scene");
+  document.getElementById("replay-bar").classList.toggle("hide", m !== "scene");
+  document.getElementById("mesh").classList.toggle("hide", m !== "schematic");
+  document.getElementById("mesh-list").classList.toggle("hide", m !== "list");
+  listMode = m === "list";
+  if (m === "schematic") renderMesh();
+  if (m === "list") renderList();
+  if (m === "scene" && SCENE3D) { SCENE3D.scene._resize(); SCENE3D.scene.requestRender(); }
+  if (FEED) { if (m === "scene" && FEED.mode === "paused") FEED.resumeLive(); if (m !== "scene") FEED.pause(); }
+  if (TOOLS) TOOLS.setBadge(FEED ? FEED.mode : "paused");
+}
+
+async function init3d() {
+  const tools = document.getElementById("scene-tools");
+  const note = document.getElementById("scene-note");
+  const hostEl = document.getElementById("scene3d");
+  const clearLoad = ok => {
+    const l = hostEl.querySelector(".scene-loading");
+    if (l) l.remove();
+    hostEl.classList.remove("loading");
+    if (!ok) hostEl.classList.add("hide");
+  };
+  const wide = window.innerWidth > 900;
+  let mod = null;
+  try { mod = await import("/assets/scenes3d.js"); } catch (e) { mod = null; }
+  const canScene = wide && mod && mod.supportsWebGL();
+  const modes = canScene
+    ? [["scene", "3D scene"], ["schematic", "Schematic"], ["list", "List"]]
+    : [["schematic", "Schematic"], ["list", "List"]];
+  if (canScene) {
+    const built = mod.buildAgents(document.getElementById("scene3d"), {
+      onSelect: id => {
+        if (id && AGENT_IDS.has(id)) { selected = id; renderInspect(); document.getElementById("f-stage").value = id; loadLog().catch(() => {}); }
+        else if (!id) { selected = null; renderInspect(); }
+      },
+    });
+    if (built) {
+      SCENE3D = built;
+      FEED = new mod.EventFeed({
+        onEvent: (e, ctx) => {
+          SCENE3D.applyEvent(e, ctx);
+          if (ctx && ctx.replay) {
+            const sc = document.getElementById("replay-scrub");
+            sc.max = ctx.total; sc.value = ctx.index;
+            document.getElementById("replay-pos").textContent =
+              `${ctx.index}/${ctx.total} · ${fmt.ts(e.ts)}`;
+          }
+        },
+        onMode: m => TOOLS && TOOLS.setBadge(m === "replay-done" ? "replay" : m),
+      });
+      wireReplay();
+      clearLoad(true);
+    } else { clearLoad(false); note.textContent = "3D scene unavailable on this device — showing the schematic instead."; note.classList.remove("hide"); }
+  } else if (wide && !mod) {
+    clearLoad(false);
+    note.textContent = "3D engine failed to load — showing the schematic instead. Everything still works.";
+    note.classList.remove("hide");
+  } else clearLoad(false);
+  // camera presets + tour replay live in the toolbar only when the scene does
+  const extra = (canScene && SCENE3D) ? `
+    <span class="seg" role="group" aria-label="Camera preset">
+      <button type="button" data-preset="reset" title="Frame the whole floor">Overview</button>
+      <button type="button" data-preset="workflow" title="Follow the production arc">Workflow</button>
+      <button type="button" data-preset="attention" title="Jump to anything failed or held">Attention</button>
+      <button type="button" data-preset="review" title="Quarantine pods and your console">Review</button>
+    </span>
+    <button type="button" class="small ghost" data-tour title="Replay the orientation tour">✦ Tour</button>` : "";
+  TOOLS = (mod || { }).sceneTools ? mod.sceneTools(tools, {
+    modes, onMode: setViewMode, scene: () => SCENE3D && SCENE3D.scene, feed: FEED, extra,
+  }) : null;
+  tools.querySelectorAll("[data-preset]").forEach(b =>
+    b.onclick = () => SCENE3D && SCENE3D.scene.setPreset(b.dataset.preset));
+  const tourBtn = tools.querySelector("[data-tour]");
+  if (tourBtn) tourBtn.onclick = () => SCENE3D && !TOUR && (TOUR = mod.startAgentsTour(SCENE3D, { onDone: () => { TOUR = null; } }));
+  if (!TOOLS) {   // no module at all: plain seg fallback
+    tools.innerHTML = `<span class="seg" role="group">${modes.map(([id, l]) =>
+      `<button type="button" data-mode="${id}" aria-pressed="false">${l}</button>`).join("")}</span>`;
+    tools.querySelectorAll("[data-mode]").forEach(b => b.onclick = () => {
+      tools.querySelectorAll("[data-mode]").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+      setViewMode(b.dataset.mode);
+    });
+  }
+  const start = (SCENE3D && canScene) ? "scene" : "schematic";
+  (TOOLS ? TOOLS.setMode : m => setViewMode(m))(start);
+  if (SCENE3D && start === "scene" && FEED) FEED.live();
+  if (SCENE3D && AGENTS) SCENE3D.setData(AGENTS);
+  // first visit only: the orientation tour (server remembers; motion-averse
+  // users never get an uninvited camera flight)
+  if (SCENE3D && start === "scene" && !mod.reducedMotion()) {
+    fetchJSON("/api/shell").then(d => {
+      if (!(d.seen || []).includes("tour-v1") && !TOUR)
+        TOUR = mod.startAgentsTour(SCENE3D, { onDone: () => { TOUR = null; } });
+    }).catch(() => {});
+  }
+}
+
+function wireReplay() {
+  fetchJSON("/api/runs?days=7").then(d => {
+    const sel = document.getElementById("replay-run");
+    sel.innerHTML = `<option value="">choose a run…</option>` + d.runs.slice(-24).reverse().map(r =>
+      `<option value="${esc(r.run_id)}">${esc(r.stage)} · ${esc(fmt.ts(r.start_ts))} · ${esc(r.outcome)}</option>`).join("");
+  }).catch(() => {});
+  const go = async () => {
+    const runId = document.getElementById("replay-run").value;
+    const appId = document.getElementById("replay-app").value.trim();
+    if (!runId && !appId) return;
+    const q = runId ? `run_id=${encodeURIComponent(runId)}` : `application_id=${encodeURIComponent(appId)}`;
+    const d = await fetchJSON(`/api/events?${q}&limit=500`);
+    if (!d.events.length) { alert("No events recorded for that selection."); return; }
+    const speed = +document.getElementById("replay-speed").value;
+    document.getElementById("replay-scrub").max = d.events.length;
+    FEED.replay(d.events, { speed });
+    document.getElementById("replay-playpause").setAttribute("aria-pressed", "true");
+  };
+  document.getElementById("replay-go").onclick = () => go().catch(e => alert(e.message));
+  document.getElementById("replay-playpause").onclick = e => {
+    if (!FEED._replay) return;
+    const playing = FEED._replay.playing;
+    if (playing) FEED.replayPause(); else FEED.replayPlay();
+    e.currentTarget.setAttribute("aria-pressed", String(!playing));
+  };
+  document.getElementById("replay-scrub").oninput = e => {
+    if (!FEED._replay) return;
+    FEED.replayPause(); FEED.replaySeek(+e.target.value);
+    document.getElementById("replay-playpause").setAttribute("aria-pressed", "false");
+  };
+  document.getElementById("replay-speed").onchange = e => { if (FEED._replay) FEED._replay.speed = +e.target.value; };
+  document.getElementById("replay-live").onclick = () => { FEED.resumeLive(); };
+}
+
+async function loadAgents() {
+  AGENTS = await fetchJSON("/api/agents");
+  renderStateChips();
+  renderMesh();
+  if (listMode) renderList();
+  renderInspect();
+  renderHead();
+  if (SCENE3D) {
+    SCENE3D.setData(AGENTS);
+    SCENE3D.scene.dimFilter = n =>
+      !AGENT_IDS.has(n.id) || matchesFilter(podState(AGENTS.agents.find(a => a.stage === n.id) || {}));
+    SCENE3D.scene._paintStates();
+  }
+  const t = AGENTS.totals;
+  document.getElementById("cost-note").textContent =
+    `$${t.cost_mtd.toFixed(2)} of $${t.cap} cap · billed per token`;
+  const withCost = AGENTS.agents.filter(a => a.spend.mtd > 0).sort((a, b) => b.spend.mtd - a.spend.mtd);
+  if (costChart) costChart.destroy();
+  costChart = hbarChart(document.getElementById("ch-agentcost"),
+    withCost.map(a => a.name), withCost.map(a => a.spend.mtd),
+    { fmt: v => "$" + (+v).toFixed(2) });
+  document.getElementById("cost-summary").textContent =
+    "Month to date: " + (withCost.map(a => `${a.name} $${a.spend.mtd.toFixed(2)}`).join(" · ") || "no spend yet")
+    + ` · total $${t.cost_mtd.toFixed(2)} of the $${t.cap} cap.`;
+}
+
+/* ---- timeline + decision log (audit surface) --------------------------- */
+
+async function loadTimeline() {
+  const d = await fetchJSON("/api/runs?days=7");
+  const days = [...new Set(d.runs.map(r => r.date))].sort();
+  const stages = STAGE_ORDER.filter(s => d.runs.some(r => r.stage === s));
+  const tl = document.getElementById("tl");
+  if (!d.runs.length) { tl.innerHTML = `<div class="empty">no runs recorded yet</div>`; return; }
+  let html;
+  if (matchMedia("(max-width: 900px)").matches) {
+    // phone: one collapsible group per day, newest first, today open
+    tl.style.gridTemplateColumns = "1fr";
+    const newest = days[days.length - 1];
+    html = [...days].reverse().map(day => {
+      const runs = d.runs.filter(r => r.date === day);
+      const fails = runs.filter(r => r.outcome === "fail").length;
+      const open = day === newest || runs.some(r => r.run_id === runFilter);
+      return `<details class="tl-day" ${open ? "open" : ""}>
+        <summary>${esc(day)} — ${runs.length} run${runs.length === 1 ? "" : "s"}${fails ? ` · <b class="tlf">${fails} failed</b>` : ""}</summary>
+        <div class="tl-day-list">` + runs.map(r =>
+          `<button class="tl-run wide ${esc(r.outcome)} ${runFilter === r.run_id ? "selected" : ""}"
+             data-run="${esc(r.run_id)}">
+             <b>${esc(r.stage)}</b> · ${esc(ampm(r.start_ts.slice(11, 16)))} · ${esc(r.outcome)}${r.reason ? ` · ${esc(r.reason.slice(0, 40))}` : ""}</button>`).join("") +
+        `</div></details>`;
+    }).join("");
+  } else {
+    tl.style.gridTemplateColumns = `max-content repeat(${days.length}, minmax(64px,1fr))`;
+    html = `<div></div>` + days.map(day => `<div class="hdr">${esc(day.slice(5))}</div>`).join("");
+    for (const s of stages) {
+      html += `<div class="stage-name">${esc(s)}</div>`;
+      for (const day of days) {
+        const runs = d.runs.filter(r => r.stage === s && r.date === day);
+        html += `<div class="tl-cell">` + runs.map(r =>
+          `<button class="tl-run ${esc(r.outcome)} ${runFilter === r.run_id ? "selected" : ""}"
+             data-run="${esc(r.run_id)}"
+             title="${esc(r.outcome)} · ${esc(fmt.ms(r.duration_ms))} · ${esc(r.reason)}">
+             ${esc(ampm(r.start_ts.slice(11, 16)))}</button>`).join("") + `</div>`;
+      }
+    }
+  }
+  tl.innerHTML = html;
+  tl.querySelectorAll(".tl-run").forEach(b => b.onclick = () => {
+    runFilter = runFilter === b.dataset.run ? null : b.dataset.run;
+    loadTimeline().catch(() => {});
+    loadLog().catch(() => {});
+  });
+}
+
+function detailRow(r) {
+  const parts = [`run <span class="mono">${esc(r.run_id)}</span>`];
+  if (r.cost_usd) parts.push(`cost <span class="mono">$${(+r.cost_usd).toFixed(4)}</span>`);
+  if (r.token_detail) parts.push(`tokens <span class="mono">${esc(r.token_detail)}</span>`);
+  if (r.application_id) parts.push(`<a href="/applications#app-${r.application_id}">application #${r.application_id}</a>`);
+  let html = parts.join(" · ");
+  if (r.detail) html += `<pre style="white-space:pre-wrap;margin-top:6px;font-size:11px;color:var(--muted);">${esc(r.detail)}</pre>`;
+  return html;
+}
+
+async function loadLog() {
+  const p = new URLSearchParams();
+  const v = id => document.getElementById(id).value.trim();
+  if (v("f-stage")) p.set("stage", v("f-stage"));
+  if (v("f-outcome")) p.set("outcome", v("f-outcome"));
+  if (v("f-date")) p.set("date", v("f-date"));
+  if (v("f-q")) p.set("q", v("f-q"));
+  if (runFilter) p.set("run_id", runFilter);
+  const d = await fetchJSON("/api/activity?" + p);
+  document.getElementById("run-filter").innerHTML = runFilter
+    ? `<span class="pill em" style="cursor:pointer" role="button" tabindex="0">run: ${esc(runFilter)} ✕</span>` : "";
+  const rf = document.querySelector("#run-filter .pill");
+  if (rf) rf.onclick = () => { runFilter = null; loadTimeline().catch(()=>{}); loadLog().catch(()=>{}); };
+  openDetail = null;
+  const body = document.getElementById("rows");
+  if (!d.rows.length) {
+    body.innerHTML = `<tr><td colspan="8" class="empty">nothing matches</td></tr>`;
+    return;
+  }
+  body.innerHTML = d.rows.map((r, i) => `
+    <tr class="clickable" data-i="${i}">
+      <td class="mono">${esc(fmt.ts(r.ts))}</td>
+      <td class="mono">${esc(r.stage)}</td>
+      <td class="mono">${esc(r.action)}</td>
+      <td>${esc(r.subject || "")}</td>
+      <td><span class="o o-${esc(r.outcome)}">${esc(r.outcome)}</span></td>
+      <td>${esc(r.reason || "")}</td>
+      <td class="num">${r.duration_ms || ""}</td>
+      <td class="num">${r.tokens_used || ""}</td>
+    </tr>`).join("");
+  body.querySelectorAll("tr.clickable").forEach(tr => tr.onclick = () => {
+    const was = openDetail && openDetail.dataset.for === tr.dataset.i;
+    if (openDetail) { openDetail.remove(); openDetail = null; }
+    if (was) return;
+    const det = document.createElement("tr");
+    det.className = "detail-row";
+    det.dataset.for = tr.dataset.i;
+    det.innerHTML = `<td colspan="8">${detailRow(d.rows[+tr.dataset.i])}</td>`;
+    tr.after(det);
+    openDetail = det;
+  });
+}
+
+let t = null;
+document.addEventListener("DOMContentLoaded", () => {
+  if (qparam("outcome")) document.getElementById("f-outcome").value = qparam("outcome");
+  if (qparam("date")) document.getElementById("f-date").value = qparam("date");
+  skelRows(document.getElementById("rows"), 8, 8);
+  const fail = e => document.getElementById("rows").innerHTML =
+    `<tr><td colspan="8" class="err">failed: ${esc(e.message)}</td></tr>`;
+  loadAgents().catch(e => document.getElementById("pods").innerHTML =
+    `<div class="err" style="padding:20px;">agents failed to load: ${esc(e.message)}</div>`);
+  loadTimeline().catch(fail);
+  loadLog().catch(fail);
+  init3d().catch(() => {
+    const note = document.getElementById("scene-note");
+    note.textContent = "3D engine failed to load — showing the schematic instead. Everything still works.";
+    note.classList.remove("hide");
+    setViewMode("schematic");
+  });
+  for (const id of ["f-stage", "f-outcome", "f-date"])
+    document.getElementById(id).onchange = () => loadLog().catch(fail);
+  document.getElementById("f-q").oninput = () => {
+    clearTimeout(t);
+    t = setTimeout(() => loadLog().catch(fail), 250);
+  };
+  document.getElementById("f-clear").onclick = () => {
+    for (const id of ["f-stage", "f-outcome", "f-date", "f-q"])
+      document.getElementById(id).value = "";
+    runFilter = null; selected = null;
+    renderMesh(); renderInspect();
+    loadTimeline().catch(fail);
+    loadLog().catch(fail);
+  };
+  window.addEventListener("resize", () => { renderMesh(); });
+  document.addEventListener("keydown", e => {          // Esc exits 3D focus mode
+    if (e.key === "Escape" && !e.defaultPrevented && selected && viewMode === "scene") {
+      selectPod(selected);
+    }
+  });
+  setInterval(() => { loadAgents().catch(() => {}); loadLog().catch(() => {}); }, 60000);
+});
+</script>
+</body>
+</html>

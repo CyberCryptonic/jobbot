@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0B0B0A">
+<title>JobBot · Knowledge Vault</title>
+<link rel="stylesheet" href="/assets/style.css">
+<script type="importmap">{"imports":{"three":"/assets/vendor/three.module.min.js"}}</script>
+<script src="/assets/app.js" defer></script>
+</head>
+<body data-page="answers">
+<main id="main">
+  <header class="pagehead">
+    <h1>Knowledge Vault <small id="meta"></small></h1>
+    <p class="sub">Everything the system is allowed to say on an application form, in one place.
+      It never invents an answer: every field on every form is filled from here, or the job is
+      skipped and the question appears below as a gap. Edit anything — changes apply from the
+      very next run. Private values stay masked until you reveal them.</p>
+  </header>
+
+  <details class="about"><summary>How this works</summary>
+    <div class="body">
+      <p>When a form asks something this bank doesn't cover, the system follows one rule: optional →
+      leave blank; required but safely inferable → infer and log it; required and unknown → <b>skip the
+      job</b> and record the question here as a <b>gap</b>. Answer a gap once and every future form that
+      asks it fills automatically.</p>
+      <p>Sections marked <span class="pill warn">attestation</span> (salary, experience years, clearance)
+      are answers on signed forms — edit them only when the truth changes. Every edit is logged and the
+      file is backed up daily before the first change.</p>
+    </div>
+  </details>
+
+  <h2 id="gaps-h">Open gaps <small>— questions waiting for you</small></h2>
+  <div id="gaps"></div>
+
+  <h2>Who the forms say you are</h2>
+  <div class="panel" id="identity"><div class="panel-b"><div class="skel" style="height:60px"></div></div></div>
+
+  <section class="panel" style="margin-bottom:14px;">
+    <div class="panel-h"><span class="t">Vault</span>
+      <span class="m" style="margin-left:0;margin-right:auto;">the bank's sections as vault sectors — tap one to open it below</span>
+      <span class="scene-tools" id="scene-tools"></span></div>
+    <div id="scene3d" class="ops3d-host loading" data-scene="vault" style="min-height:380px;"><div class="scene-loading" role="status"><span class="sl-ring" aria-hidden="true"></span><span>Initializing spatial view…</span></div></div>
+    <div class="scene-fallback-note hide" id="scene-note"></div>
+  </section>
+
+  <h2>The bank</h2>
+  <div class="filters">
+    <input type="search" id="f-q" placeholder="Search any field or answer…" aria-label="Search the answer bank" autocomplete="off">
+  </div>
+  <div id="sections"><div class="skel skel-card"></div><div class="skel skel-card"></div></div>
+</main>
+
+<script>
+"use strict";
+let DATA = null;
+
+/* ---------- gaps ---------- */
+
+function renderGaps() {
+  const el = document.getElementById("gaps");
+  const gaps = DATA.gaps || [];
+  if (!gaps.length) {
+    el.innerHTML = `<div class="panel empty" style="padding:18px;">
+      <span style="color:var(--ok);font-weight:600;">✓ No open gaps.</span><br>
+      <span class="sub">Every screening question a form has asked is covered. Skipped-for-missing-answer
+      jobs will list their questions here.</span></div>`;
+    return;
+  }
+  el.innerHTML = gaps.map(g => `
+    <div class="gap-card" id="gap-${g.id}">
+      <div class="q">${esc(g.question)}</div>
+      <div class="m">asked ${g.times_seen}×, last ${esc(fmt.ts(g.last_seen))}
+        ${g.first_application_id ? ` · first hit <a href="/applications#app-${g.first_application_id}">application #${g.first_application_id}</a>` : ""}</div>
+      <textarea placeholder="Your answer, exactly as a form should receive it… (blank line = paragraph break)"></textarea>
+      <div class="row">
+        <button class="primary" data-save="${g.id}">Save answer — closes this gap for good</button>
+        <button class="ghost" data-dismiss="${g.id}" title="Drop the question without answering">Dismiss</button>
+      </div>
+    </div>`).join("");
+  el.querySelectorAll("[data-save]").forEach(b => b.onclick = async () => {
+    const card = b.closest(".gap-card");
+    const answer = card.querySelector("textarea").value.trim();
+    if (!answer) { alert("Type the answer first."); return; }
+    b.disabled = true;
+    b.innerHTML = `<span class="spin"></span> Saving…`;
+    try { await post(`/api/answers/gaps/${b.dataset.save}`, { answer }); await load(); refreshShell(); }
+    catch (e) { alert(e.message); b.disabled = false; b.textContent = "Save answer — closes this gap for good"; }
+  });
+  el.querySelectorAll("[data-dismiss]").forEach(b => b.onclick = async () => {
+    if (!confirm("Dismiss this question without an answer? Jobs that require it will keep being skipped.")) return;
+    b.disabled = true;
+    try { await post(`/api/answers/gaps/${b.dataset.dismiss}`, { dismiss: true }); await load(); refreshShell(); }
+    catch (e) { alert(e.message); b.disabled = false; }
+  });
+}
+
+/* ---------- identity (masked by default; one deliberate reveal) --------- */
+
+let identityShown = false;
+
+function renderIdentity() {
+  const f = (DATA.identity || {}).fields || {};
+  const keys = Object.keys(f);
+  document.getElementById("identity").innerHTML = `<div class="panel-b">
+    <div style="display:flex;gap:8px 22px;flex-wrap:wrap;align-items:flex-start;">
+      ${keys.map(k => `<div><div class="sub">${esc(k.replace(/_/g, " "))}</div>
+        <div class="mono" style="font-size:12.5px;color:var(--ink-2)">${identityShown ? esc(f[k]) : '<span class="masked">••••••</span>'}</div></div>`).join("")
+      || `<span class="sub">identity.json not readable</span>`}
+      ${keys.length ? `<button class="small" id="id-reveal" aria-pressed="${identityShown}" style="margin-left:auto;">${identityShown ? "Hide" : "Reveal"} identity</button>` : ""}
+    </div>
+    <div class="sub" style="margin-top:10px;">Contact identity lives in <span class="mono">identity.json</span>
+    (read-only here) and in the Jobright profile. The resume itself is never modified by anything.</div>
+  </div>`;
+  const b = document.getElementById("id-reveal");
+  if (b) b.onclick = () => { identityShown = !identityShown; renderIdentity(); };
+}
+
+/* private values in the bank itself: masked until deliberately revealed */
+const SENSITIVE_RX = /phone|current location|address|legal name|first and last name/i;
+const revealed = new Set();
+
+/* ---------- sections ---------- */
+
+function rowHTML(sec, r, i) {
+  const rid = `${sec.key}:${r.field}`;
+  const sensitive = SENSITIVE_RX.test(r.field);
+  const shown = !sensitive || revealed.has(rid);
+  const val = shown ? esc(r.answer)
+    : `<span class="reveal-wrap"><span class="masked">••••••••</span>
+       <button class="small ghost" data-reveal="${esc(rid)}" aria-pressed="false" title="Show this private value">Reveal</button></span>`;
+  return `<tr data-sec="${esc(sec.key)}" data-i="${i}">
+    <td style="width:42%;">${esc(r.field)}${sensitive ? ' <span class="pill" title="masked by default — private value">private</span>' : ""}</td>
+    <td class="ans-a">${val}</td>
+    <td style="width:1%;"><button class="small ghost" data-edit title="edit this answer" aria-label="Edit ${esc(r.field)}">✎</button></td>
+  </tr>`;
+}
+
+function editorRow(sec, r) {
+  return `<tr class="ans-row-edit"><td colspan="3">
+    ${r ? `<div class="sub" style="margin-bottom:6px;">${esc(r.field)}</div>`
+        : `<input type="text" data-field placeholder="Question exactly as forms ask it" style="width:100%;margin-bottom:8px;">`}
+    <textarea data-answer placeholder="The answer, exactly as a form should receive it">${r ? esc(r.answer) : ""}</textarea>
+    <div class="row">
+      <button class="primary small" data-saverow>Save</button>
+      <button class="small" data-cancel>Cancel</button>
+      ${sec.attest ? `<span class="sub" style="color:var(--warn)">attestation — save only if the truth changed</span>` : ""}
+    </div>
+  </td></tr>`;
+}
+
+function renderSections() {
+  const q = (document.getElementById("f-q").value || "").trim().toLowerCase();
+  const box = document.getElementById("sections");
+  box.innerHTML = (DATA.sections || []).map(sec => {
+    let rows = sec.rows;
+    if (q) rows = rows.filter(r => (r.field + " " + r.answer).toLowerCase().includes(q));
+    if (q && !rows.length && !sec.title.toLowerCase().includes(q)) return "";
+    const table = sec.rows.length || sec.editable ? `
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>Form question / field</th><th>The answer given</th><th></th></tr></thead>
+        <tbody>
+          ${rows.map((r, i) => rowHTML(sec, r, sec.rows.indexOf(r))).join("")
+            || `<tr><td colspan="3" class="empty">no rows${q ? " match" : " yet"}</td></tr>`}
+        </tbody>
+      </table></div>
+      ${sec.editable ? `<div style="padding:10px 14px;"><button class="small" data-add="${esc(sec.key)}">+ Add a row to §${esc(sec.key)}</button></div>` : ""}` : "";
+    return `
+    <details class="panel ans-sec" ${q || ["A", "M"].includes(sec.key) ? "open" : ""} data-sec="${esc(sec.key)}">
+      <summary>
+        <span class="arrow">▶</span>
+        <span class="letter">${esc(sec.key)}</span>
+        <span class="t">${esc(sec.title)}</span>
+        ${sec.attest ? `<span class="pill warn">attestation</span>` : ""}
+        <span class="n">${sec.rows.length ? sec.rows.length + " answers" : "reference"}</span>
+      </summary>
+      ${sec.attest ? `<div class="attest-note">These are answers on signed application forms. Every application
+        uses them identically. Change a value only when the truth changes — never to look better for one job.</div>` : ""}
+      ${sec.key === "G" && sec.prose ? `<div style="padding:0 16px 13px;">
+        <div class="prose blurred" id="prose-g">${esc(sec.prose)}</div>
+        <button class="small" data-unblur="prose-g" aria-pressed="false" style="margin-top:8px;">Reveal references (contains contact details)</button>
+      </div>` : sec.prose && !sec.rows.length ? `<div class="prose">${esc(sec.prose)}</div>` : ""}
+      ${sec.prose && sec.rows.length ? `<details style="margin:0 14px 8px;"><summary class="sub" style="cursor:pointer;">section notes</summary><div class="prose" style="padding:6px 0;">${esc(sec.prose)}</div></details>` : ""}
+      ${table}
+    </details>`;
+  }).join("");
+
+  box.querySelectorAll("[data-reveal]").forEach(b => b.onclick = () => {
+    revealed.add(b.dataset.reveal);
+    renderSections();
+  });
+  box.querySelectorAll("[data-unblur]").forEach(b => b.onclick = () => {
+    const el = document.getElementById(b.dataset.unblur);
+    const now = el.classList.toggle("blurred");
+    b.setAttribute("aria-pressed", String(!now));
+    b.textContent = now ? "Reveal references (contains contact details)" : "Hide references";
+  });
+  box.querySelectorAll("[data-edit]").forEach(b => b.onclick = e => {
+    e.preventDefault();
+    const tr = b.closest("tr");
+    const sec = DATA.sections.find(s => s.key === tr.dataset.sec);
+    const r = sec.rows[+tr.dataset.i];
+    openEditor(tr, sec, r);
+  });
+  box.querySelectorAll("[data-add]").forEach(b => b.onclick = () => {
+    const sec = DATA.sections.find(s => s.key === b.dataset.add);
+    const tbody = b.closest(".ans-sec").querySelector("tbody");
+    const anchor = document.createElement("tr");
+    tbody.appendChild(anchor);
+    openEditor(anchor, sec, null);
+  });
+}
+
+function openEditor(tr, sec, r) {
+  const old = document.querySelector(".ans-row-edit");
+  if (old) old.remove();
+  const holder = document.createElement("tbody");
+  holder.innerHTML = editorRow(sec, r);
+  const ed = holder.firstElementChild;
+  tr.after(ed);
+  if (r) tr.classList.add("hide");
+  const done = () => { ed.remove(); tr.classList.remove("hide"); if (!r && !tr.dataset.sec) tr.remove(); };
+  ed.querySelector("[data-cancel]").onclick = done;
+  ed.querySelector("[data-saverow]").onclick = async () => {
+    const btn = ed.querySelector("[data-saverow]");
+    const field = r ? r.field : (ed.querySelector("[data-field]").value || "").trim();
+    const answer = ed.querySelector("[data-answer]").value.trim();
+    if (!field || !answer) { alert("Both the question and the answer are needed."); return; }
+    btn.disabled = true;
+    btn.innerHTML = `<span class="spin"></span>`;
+    try {
+      await post("/api/answers/row", {
+        section: sec.key, field, answer, original_field: r ? r.field : "" });
+      await load();
+    } catch (e) { alert("Not saved: " + e.message); btn.disabled = false; btn.textContent = "Save"; }
+  };
+  ed.querySelector("[data-answer]").focus();
+}
+
+async function load() {
+  DATA = await fetchJSON("/api/answers");
+  document.getElementById("meta").textContent =
+    `${DATA.file.name} · last edited ${fmt.ts(DATA.file.modified)}`;
+  renderGaps();
+  renderIdentity();
+  renderSections();
+  if (S3D) syncScene();
+  if (location.hash === "#gaps") flashEl(document.getElementById("gaps-h"));
+  if (location.hash.startsWith("#gap-")) flashEl(document.querySelector(location.hash));
+}
+
+/* ---- Knowledge vault scene ---- */
+let S3D = null;
+const SENSITIVE_SECTIONS = new Set(["ID", "C", "E", "G"]);
+async function init3d() {
+  let mod = null;
+  try { mod = await import("/assets/scenes3d.js"); } catch (e) { mod = null; }
+  if (!mod) return;
+  S3D = mod.initPageScene({
+    tools: document.getElementById("scene-tools"),
+    host: document.getElementById("scene3d"),
+    note: document.getElementById("scene-note"),
+    builder: mod.buildVault,
+    wantFeed: false,
+    buildOpts: { onSector: key => {
+      if (!key) return;
+      const sec = document.querySelector(`.ans-sec[data-sec="${key}"]`);
+      if (sec) { sec.open = true; flashEl(sec); }
+    } },
+  });
+  if (S3D) syncScene();
+}
+function syncScene() {
+  if (!S3D || !DATA) return;
+  const recentFields = (SHELL && SHELL.history || [])
+    .filter(h => h.kind === "answer_bank_update").map(h => h.title);
+  S3D.setData(DATA.sections.map(s => ({ ...s, sensitive: SENSITIVE_SECTIONS.has(s.key) })),
+    { gapsOpen: (DATA.gaps || []).length, recentFields });
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  init3d().catch(() => {});
+  document.addEventListener("shell", () => syncScene());
+  load().catch(e => document.getElementById("sections").innerHTML =
+    `<div class="err">answers failed to load: ${esc(e.message)}</div>`);
+  document.getElementById("f-q").oninput = () => renderSections();
+});
+</script>
+</body>
+</html>

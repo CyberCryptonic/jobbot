@@ -1,0 +1,15 @@
+{
+  "_note": "Copy to identity.json, fill in, then: chmod 600 identity.json. This is the ONLY source of name/contact fields for forms, letters and email. The email must equal MAIL_ADDRESS in .env or the loader refuses it (replies would miss the inbox the pipeline reads). identity.json is gitignored; never commit it.",
+  "first_name": "Alex",
+  "last_name": "Rivera",
+  "email": "applicant@example.org",
+  "phone": "555-010-0100",
+  "website": "https://example.org",
+  "github": "https://github.com/example",
+  "linkedin": "https://www.linkedin.com/in/example",
+  "city": "Rivertown",
+  "state": "NY",
+  "country": "United States",
+  "headline": "One-line professional headline, matches the resume",
+  "location": "Rivertown, NY"
+}

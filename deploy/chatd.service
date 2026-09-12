@@ -1,0 +1,16 @@
+[Unit]
+Description=jobbot chat daemon (polls commands table every 3s)
+After=network.target
+
+[Service]
+Type=simple
+# Set User to the account that owns the project checkout, and both paths to
+# your project root (install-services.sh substitutes these automatically).
+User=YOURUSER
+WorkingDirectory=/home/YOURUSER/jobbot
+ExecStart=/home/YOURUSER/jobbot/venv/bin/python /home/YOURUSER/jobbot/chatd.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

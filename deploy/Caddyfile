@@ -1,0 +1,10 @@
+# jobbot Caddyfile — install at /etc/caddy/Caddyfile (install-services.sh does
+# this and keeps a backup of the stock file). Caddy fronts :80 on the LAN and
+# any overlay network (Tailscale or similar) and proxies everything to the
+# jobbot web service on localhost. Caddy touches no project files, so it needs
+# no permissions into the project directory. ntfy on :2586 is separate.
+
+:80 {
+	encode gzip
+	reverse_proxy 127.0.0.1:8090
+}

@@ -1,0 +1,7 @@
+# Self-hosted ntfy server config — install at /etc/ntfy/server.yml.
+# base-url is what notification links open on your phone; use the hostname
+# your devices reach the container by (a Tailscale MagicDNS name works well).
+# The topic name in .env is effectively your access control on a private
+# server: treat it like a password. See docs/BUILD-GUIDE.md part 7.
+base-url: "http://YOUR-HOSTNAME:2586"
+listen-http: ":2586"

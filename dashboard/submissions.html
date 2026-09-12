@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0B0B0A">
+<title>JobBot · Secure Egress</title>
+<link rel="stylesheet" href="/assets/style.css">
+<script type="importmap">{"imports":{"three":"/assets/vendor/three.module.min.js"}}</script>
+<script src="/assets/app.js" defer></script>
+</head>
+<body data-page="submissions">
+<main id="main">
+  <header class="pagehead">
+    <h1>Secure Egress <small id="mode"></small></h1>
+    <p class="sub">The paper trail for every automated application. Each packet shows the exact form the
+      system read, how it planned to fill every field, what it attached, and — for live sends —
+      screenshots of the finished form. Nothing here needs daily attention unless a banner says so.</p>
+  </header>
+
+  <div id="review" ></div>
+
+  <div class="tiles" id="tiles" style="margin-bottom:14px;"></div>
+
+  <section class="panel" style="margin-bottom:14px;">
+    <div class="panel-h"><span class="t">Launch control</span>
+      <span class="m" style="margin-left:0;margin-right:auto;">bays, the review gate, and the outbound gateway — tap a bay to filter packets</span>
+      <span class="scene-tools" id="scene-tools"></span></div>
+    <div id="scene3d" class="ops3d-host loading" data-scene="egress" style="min-height:380px;"><div class="scene-loading" role="status"><span class="sl-ring" aria-hidden="true"></span><span>Initializing spatial view…</span></div></div>
+    <div class="scene-fallback-note hide" id="scene-note"></div>
+  </section>
+
+  <details class="about"><summary>What the decisions mean</summary>
+    <div class="body"><p><b>READY</b> — the form was readable ahead of time and every field has an answer;
+    the head can submit it. <b>HANDOFF</b> — the form can't be read ahead (login walls, embedded apps), so
+    Jobright autofill handles it live. <b>SKIP</b> — a required question had no answer in the bank
+    (§L rule 3: never guess), so the job was skipped and the question logged as a gap.</p></div>
+  </details>
+
+  <div class="filters" id="filters">
+    <label><input type="checkbox" data-f="ready" checked> ready</label>
+    <label><input type="checkbox" data-f="handoff" checked> handoff</label>
+    <label><input type="checkbox" data-f="skip" checked> skip</label>
+    <input type="search" id="q" placeholder="Filter company / role / platform" aria-label="Filter packets" autocomplete="off">
+  </div>
+  <div id="packets"></div>
+
+  <h2>Manual queue actions taken in dry run</h2>
+  <div class="panel tbl-wrap"><table id="ui"><thead><tr><th>When</th><th>Action</th><th>Job</th><th>Logged</th></tr></thead><tbody></tbody></table></div>
+</main>
+
+<script>
+"use strict";
+let DATA = null;
+
+function fieldRows(fields) {
+  if (!fields || !fields.length) return "<tr><td colspan=4 class='sub'>form not readable ahead of time</td></tr>";
+  return fields.map(f => `<tr>
+      <td>${f.required ? "✱ " : ""}${esc(f.label)}</td>
+      <td><code class="mono" style="font-size:11px">${esc(f.fill)}</code></td>
+      <td>${esc(String(f.value || ""))}</td>
+      <td class="sub">${esc(f.source || "")}</td></tr>`).join("");
+}
+
+function card(p) {
+  const att = p.attachments.map(a => `<li>${esc(a.role)}: <code>${esc(a.file)}</code> <span class="sub">sha256 ${esc(a.sha256.slice(0, 12))}…</span></li>`).join("");
+  const chips = (p.screening_answers || []).map(a => `<span class="chip"><b>${esc(a.q)}:</b> ${esc(a.a)}</span>`).join("");
+  const shots = (p.screenshots || []).length
+    ? `<div class="shots">${p.screenshots.map(u =>
+        `<a href="${encodeURI(u)}" target="_blank" rel="noopener noreferrer" title="${esc(u.split("/").pop())}"><img loading="lazy" src="${encodeURI(u)}" alt="form screenshot"></a>`).join("")}</div>` : "";
+  return `<div class="pk dec-${esc(p.decision)}" data-dec="${esc(p.decision)}">
+    <h3>#${p.application_id} · ${esc(p.company)} — ${esc(p.role)}
+      <span class="dec dec-${esc(p.decision)}-c">${esc(p.decision.toUpperCase())}</span></h3>
+    <div class="meta">score ${p.fit_score} · tier ${esc(p.tier || "?")} · ${esc(p.platform)} · route ${esc(p.apply_route)}
+      · letter ${p.letter_required === null ? "unknown" : p.letter_required ? "required" : "not asked"}
+      · ${esc(p.mode)} · built ${esc(fmt.ts(p.built))}</div>
+    <div class="meta" style="margin-top:2px;">${esc(p.decision_reason)}</div>
+    <div style="margin-top:4px;"><a href="${encodeURI(p.apply_url || "#")}" target="_blank" rel="noopener noreferrer">apply page ↗</a></div>
+    ${p.auto ? `<div class="meta" style="margin-top:4px;"><b>head:</b> <code>${esc(p.auto.action)}</code> ${esc(fmt.ts(p.auto.ts))} — ${esc(p.auto.reason || "")}</div>` : ""}
+    ${shots}
+    <details><summary>form (${(p.fields || []).length} fields) + attachments</summary>
+      <div class="tbl-wrap"><table class="pkt-fields"><thead><tr><th>Field</th><th>Fill</th><th>Value</th><th>Source</th></tr></thead>
+      <tbody>${fieldRows(p.fields)}</tbody></table></div>
+      <ul style="margin:8px 0 0 18px;">${att}</ul>
+      ${p.gaps.length ? `<div style="margin-top:6px;"><b>gaps:</b> ${p.gaps.map(esc).join("; ")}</div>` : ""}
+      ${p.inferred_answers.length ? `<div class="meta">inferred (§L rule 2): ${p.inferred_answers.map(esc).join("; ")}</div>` : ""}
+    </details>
+    <details><summary>screening answers (${(p.screening_answers || []).length})</summary><div class="chips" style="margin-top:6px;">${chips}</div></details>
+  </div>`;
+}
+
+function render() {
+  const on = new Set([...document.querySelectorAll("#filters input[data-f]:checked")].map(i => i.dataset.f));
+  const q = (document.getElementById("q").value || "").toLowerCase();
+  const list = DATA.packets.filter(p => on.has(p.decision) &&
+    (!q || `${p.company} ${p.role} ${p.platform}`.toLowerCase().includes(q)));
+  document.getElementById("packets").innerHTML = list.map(card).join("")
+    || `<div class="panel empty">nothing matches</div>`;
+}
+
+async function load() {
+  DATA = await fetchJSON("/api/submissions");
+  const c = DATA.counts, a = DATA.auto_submit || {};
+  document.getElementById("mode").textContent =
+    (DATA.dry_run ? "DRY RUN" : "LIVE") + " · head " + (!a.enabled ? "off" : (a.dry_run ? "dry run" : "live"));
+
+  if (a.enabled && a.awaiting_review) {
+    document.getElementById("review").innerHTML = `
+      <div class="review-banner" id="review-banner">
+        <div class="tt">⏸ Auto-submit is self-stopped, waiting for your review (${a.live_count}/${a.verify_first_n} live sends)</div>
+        <div class="sub" style="margin-top:4px;">During its first ${a.verify_first_n} live sends the head stops after
+        each one so you can check its work. Look at the screenshots on the packets below (the filled form
+        should look exactly like something you'd submit yourself), then run this on the container to let it continue:</div>
+        <div class="cmd"><span>./venv/bin/python submission.py --reviewed</span>
+          <button class="small" data-copycmd>Copy</button></div>
+      </div>`;
+    const b = document.querySelector("[data-copycmd]");
+    b.onclick = () => copyText("./venv/bin/python submission.py --reviewed", b);
+    if (location.hash === "#review") flashEl(document.getElementById("review-banner"));
+  } else {
+    document.getElementById("review").innerHTML = "";
+  }
+
+  const shotCount = DATA.packets.reduce((n, p) => n + (p.screenshots || []).length, 0);
+  document.getElementById("tiles").innerHTML = [
+    ["Packets built", DATA.packets.length, "ats/direct applications prepared"],
+    ["Ready", c.ready || 0, "fully answerable, head can submit"],
+    ["Handoff", c.handoff || 0, "Jobright autofill reads the form live"],
+    ["Skipped", c.skip || 0, "missing answer — never guessed"],
+    ["Live sends", `${a.live_count || 0}<span class="unit">/${a.verify_first_n || 20}</span>`, "review ramp progress"],
+    ["Screenshots", shotCount, "form records on file"],
+  ].map(([l, v, s]) => `<div class="tile"><div class="label">${l}</div><div class="value">${v}</div>
+    <div class="sub">${s}</div></div>`).join("");
+
+  render();
+  if (S3D) syncScene();
+  document.querySelector("#ui tbody").innerHTML = DATA.ui_dryrun.map(r =>
+    `<tr><td class="mono">${esc(fmt.ts(r.ts))}</td><td class="mono">${esc(r.action)}</td><td>${esc(r.subject)}</td><td class="sub">${esc(r.reason)}</td></tr>`).join("")
+    || "<tr><td colspan=4 class='empty'>none yet</td></tr>";
+}
+
+/* ---- Launch control scene ---- */
+let S3D = null;
+async function init3d() {
+  let mod = null;
+  try { mod = await import("/assets/scenes3d.js"); } catch (e) { mod = null; }
+  if (!mod) return;
+  S3D = mod.initPageScene({
+    tools: document.getElementById("scene-tools"),
+    host: document.getElementById("scene3d"),
+    note: document.getElementById("scene-note"),
+    builder: mod.buildEgress,
+    buildOpts: { onBay: id => {
+      if (!["ready", "handoff", "skip"].includes(id)) return;
+      document.querySelectorAll("#filters input[data-f]").forEach(i => { i.checked = i.dataset.f === id; });
+      render();
+    } },
+  });
+  if (S3D) syncScene();
+}
+function syncScene() {
+  if (!S3D || !DATA) return;
+  S3D.setData({ counts: DATA.counts, auto: DATA.auto_submit || {} });
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  init3d().catch(() => {});
+  skelTiles(document.getElementById("tiles"), 6);
+  skelCards(document.getElementById("packets"), 2);
+  document.getElementById("filters").addEventListener("change", render);
+  document.getElementById("q").addEventListener("input", render);
+  load().catch(e => { document.getElementById("packets").innerHTML = `<div class="err">${esc(e.message)}</div>`; });
+});
+</script>
+</body>
+</html>

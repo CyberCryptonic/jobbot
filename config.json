@@ -1,0 +1,267 @@
+{
+  "_comment": "Pipeline knobs. Edit and the next run picks it up. The chat agent's update_config tool (Layer 9) writes here too.",
+  "sources_enabled": {
+    "companies": true,
+    "linkedin": true,
+    "adzuna": true,
+    "usajobs": true,
+    "inbox": true
+  },
+  "quota": {
+    "daily_min": 5,
+    "daily_max": 10,
+    "manual_queue_cap": 15,
+    "one_per_company_title": true,
+    "_one_per_company_title": "true = at most one queue slot per company per title per day: the highest-scored instance queues, the others stay 'discovered' (eligible another day) and are logged as queue_dedupe",
+    "_daily_max_note": "the through-the-day loop (topup.py) can only auto-apply to jobs that get queued; at 10 the morning run fills the day's queue and later cycles find little new. Raise toward 25-35 to feed the loop more supply — but each queued ats/direct job writes a ~$0.015 letter and scoring costs too, so this spends more against cost.monthly_cap_usd. Your call."
+  },
+  "cost": {
+    "monthly_cap_usd": 40,
+    "topup_headroom_usd": 3,
+    "_note": "hard monthly API budget. topup.py stops paid discovery (scoring + letters) once month-to-date spend reaches monthly_cap_usd - topup_headroom_usd; the free submission step (probe + Playwright fill, no API) still runs so queued jobs keep applying. Does NOT gate the 6 AM discovery — that is bounded by quota.daily_max."
+  },
+  "letters": {
+    "max_per_run": 25,
+    "max_attempts": 3,
+    "soft_rewrites": 1,
+    "similarity_threshold": 0.18,
+    "_note": "max_per_run x ~$0.015 per letter is the daily letter budget",
+    "cross_window": 30,
+    "context_lines": 12,
+    "hook_window": 20,
+    "hook_avoid_fraction": 0.4,
+    "hard_echo_days": 60,
+    "_windows": "cross_window: soft sameness checks vs the last N letters; context_lines: recent letters shown to the model; hook_window/hook_avoid_fraction: a material used in more than that share of the last N letters is avoided; hard_echo_days: the hard echo check covers every letter written within N days",
+    "_soft_rewrites": "1 = a draft with only soft warnings gets one rewrite (~+$0.015 on flagged letters); 0 = log and keep"
+  },
+  "submission": {
+    "dry_run": true,
+    "_dry_run": "true = every path only LOGS what it would do. Nothing calls Jobright, nothing becomes status=applied. Flip to false only after the intended-action log has been reviewed.",
+    "verify_first_n": 20,
+    "_verify_first_n": "handoff form records captured while the head is inside its first N live sends (state.json auto_submit.live_count, submit_click only). Set 0 to turn the window off.",
+    "max_per_run": 10,
+    "_max_per_run": "jobs the submission stage processes per run. Probing/routing is free and only 'ready' jobs launch a browser, so raising this is cheap — but at a low value, gated high-score jobs (a code challenge, a rendered CAPTCHA) can consume the budget before the loop reaches lower-scored auto-applyable ones. The ramp still caps real sends at 1/run through send #20.",
+    "probe_forms": true,
+    "auto_submit": {
+      "enabled": false,
+      "dry_run": true,
+      "platforms": [
+        "greenhouse"
+      ],
+      "tiers": [
+        "A",
+        "B"
+      ],
+      "verify_first_n": 20,
+      "max_live_per_run": 3,
+      "daily_target": 10,
+      "daily_max": 10,
+      "_daily_target": "topup.py aims to reach daily_target hands-off auto-applies/day and stops finding new jobs once daily_max is reached. These are ceilings and aspirations, not guarantees: the loop can only apply to ungated, account-free jobs that exist and are queued that day, which is often fewer than the target. It never pads and never double-applies.",
+      "headless": true,
+      "nav_timeout_s": 45,
+      "_note": "the autonomous ATS head (autosubmit.py). enabled=false (the shipped default): never launches a browser, the 08:00 batch hands off exactly as before. dry_run=true: fills the real form, screenshots it to screenshots/<day>/<id>-filled.png, never clicks submit, then hands off as before. Live: the first verify_first_n sends screenshot form + confirmation for the nightly report — verification, not a gate. Counter: state.json auto_submit.live_count. Only an explicit exact-option answer-file match fills a dropdown; export controls / citizenship / clearance never inferred. Raise max_live_per_run only after the verify window has shown clean sends."
+    }
+  },
+  "titles_tier_a": [
+    "SOC Analyst",
+    "SOC Analyst I",
+    "SOC Analyst Tier 1",
+    "Security Analyst",
+    "Cybersecurity Analyst",
+    "Information Security Analyst",
+    "Security Operations Analyst",
+    "Threat Detection Analyst"
+  ],
+  "titles_tier_b": [
+    "Network Engineer",
+    "Network Security Engineer",
+    "NOC Technician",
+    "IT Security Specialist",
+    "Junior Penetration Tester",
+    "GRC Analyst",
+    "Incident Response Analyst"
+  ],
+  "titles_tier_c": [
+    "Systems Administrator",
+    "IT Analyst",
+    "Desktop Support Tier 2",
+    "Help Desk Tier 2",
+    "Technical Support Engineer",
+    "IT Generalist"
+  ],
+  "internship": {
+    "tier": "C",
+    "pattern": "\\bintern(ship)?s?\\b|\\bco-?op\\b",
+    "_note": "a title matching `pattern` scores this tier regardless of the title lists above; applies to postings scored from now on, not retroactively"
+  },
+  "linkedin": {
+    "searches": [
+      {
+        "keywords": "Security Analyst",
+        "location": "Albany, New York",
+        "distance": 45
+      },
+      {
+        "keywords": "SOC Analyst",
+        "location": "Albany, New York",
+        "distance": 45
+      },
+      {
+        "keywords": "Cybersecurity Analyst",
+        "location": "Albany, New York",
+        "distance": 45
+      },
+      {
+        "keywords": "Network Security Engineer",
+        "location": "Albany, New York",
+        "distance": 45
+      },
+      {
+        "keywords": "SOC Analyst",
+        "location": "United States",
+        "remote_only": true
+      },
+      {
+        "keywords": "Cybersecurity Analyst",
+        "location": "United States",
+        "remote_only": true
+      }
+    ],
+    "time_window_seconds": 172800,
+    "request_gap_seconds": 3,
+    "max_requests_per_run": 10
+  },
+  "adzuna": {
+    "queries": [
+      {
+        "what": "soc analyst",
+        "where": "Albany, NY",
+        "distance": 45
+      },
+      {
+        "what": "cybersecurity analyst",
+        "where": "Albany, NY",
+        "distance": 45
+      },
+      {
+        "what": "information security analyst",
+        "where": "Albany, NY",
+        "distance": 45
+      },
+      {
+        "what_phrase": "security analyst",
+        "where": "New York, NY",
+        "distance": 30
+      }
+    ],
+    "results_per_page": 50,
+    "max_days_old": 30,
+    "daily_call_cap": 8,
+    "_limits": "free tier ~1000 calls/month (~33/day); cap stays at a quarter of that"
+  },
+  "usajobs": {
+    "queries": [
+      {
+        "Keyword": "cybersecurity analyst",
+        "LocationName": "Albany, New York",
+        "Radius": 45
+      },
+      {
+        "Keyword": "information technology cybersecurity",
+        "LocationName": "New York",
+        "Radius": 75
+      },
+      {
+        "Keyword": "cybersecurity",
+        "RemoteIndicator": "True"
+      }
+    ],
+    "results_per_page": 100,
+    "daily_call_cap": 10
+  },
+  "inbox": {
+    "allowed_senders": {
+      "indeed.com": "indeed",
+      "match.indeed.com": "indeed",
+      "linkedin.com": "linkedin",
+      "jobalerts-noreply@linkedin.com": "linkedin",
+      "glassdoor.com": "glassdoor",
+      "ziprecruiter.com": "ziprecruiter",
+      "jobright.ai": "jobright"
+    },
+    "require_auth_pass": true,
+    "lookback_days_first_run": 45,
+    "lookback_days": 3
+  },
+  "resolve": {
+    "max_redirects": 4,
+    "timeout_seconds": 12,
+    "allowed_final_domains": [
+      "indeed.com",
+      "linkedin.com",
+      "glassdoor.com",
+      "ziprecruiter.com",
+      "jobright.ai",
+      "greenhouse.io",
+      "lever.co",
+      "ashbyhq.com",
+      "myworkdayjobs.com",
+      "smartrecruiters.com",
+      "workable.com",
+      "icims.com",
+      "taleo.net",
+      "oraclecloud.com",
+      "successfactors.com",
+      "adp.com",
+      "paylocity.com",
+      "paycomonline.net",
+      "bamboohr.com",
+      "jobvite.com",
+      "adzuna.com",
+      "usajobs.gov",
+      "governmentjobs.com",
+      "statejobsny.com",
+      "eightfold.ai",
+      "avature.net",
+      "dayforcehcm.com",
+      "ultipro.com",
+      "teamtailor.com",
+      "breezy.hr",
+      "applytojob.com",
+      "recruitee.com"
+    ]
+  },
+  "inbox_pass": {
+    "dry_run": true,
+    "_dry_run": "true = classify and store in inbox_messages only. No tracker row changes, no exception queue, no ntfy, no follow-ups. Flip to false after reviewing classifications on the Inbox page.",
+    "lookback_days_first_run": 45,
+    "lookback_days": 3,
+    "batch": 8,
+    "body_chars": 1500,
+    "max_model_calls_per_run": 60,
+    "backfill_unmatched": true,
+    "_backfill_unmatched": "confirmation/rejection/interview/offer/assessment mail for a company with no tracker row creates one (source=inbox) so funnel math counts applications sent by hand before the pipeline existed",
+    "noise_domains": [
+      "accounts.google.com",
+      "github.com",
+      "login.gov"
+    ],
+    "exception_max_age_days": 7,
+    "_exception_max_age_days": "interview/assessment/video/signature mail older than this still updates the tracker but raises no exception and pushes nothing (code-enforced; see inbox.py _stale)",
+    "_noise_domains": "senders classified as noise without a model call. Grows with your own inbox: add newsletter/vendor/account domains as they show up in the report's noise list."
+  },
+  "followups": {
+    "dry_run": true,
+    "_dry_run": "true = follow-up emails are written to followups/<date>/ and logged, never sent. Flip after reading a few drafts.",
+    "day_1": 7,
+    "day_2": 14,
+    "_rule": "a follow-up goes only to a row with contact_email (a human/company reply address captured from their own mail); noreply senders get nothing and the row is listed in the report as unfollowable"
+  },
+  "report": {
+    "attach_form_records": true,
+    "max_attachments": 20,
+    "dashboard_url": "http://localhost",
+    "screenshot_retention_days": 30,
+    "_attachments": "PDF form records first, then only <id>-confirmed.png; filled/blocked PNGs are linked from the Submissions page. screenshots/<day>/ older than screenshot_retention_days is pruned by the nightly report."
+  }
+}
