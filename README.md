@@ -43,7 +43,7 @@ jobbot ingests untrusted text all day and holds real credentials, so isolation c
 - Caddy on :80 for the dashboard, self-hosted ntfy on :2586 for push
 - `.env` mode 600, resume mode 444, neither in git
 
-`docs/architecture.mmd` is the Mermaid source for the diagram above. Full step-by-step for running your own copy: [docs/REPRODUCTION.md](docs/REPRODUCTION.md). Full writeup with dashboard screenshots: [I Built a Bot to Apply to Jobs for Me. Then a Referral Got Me the Job.](https://mycyberworld.org/?p=921)
+`docs/architecture.mmd` is the Mermaid source for the diagram above. Full step-by-step for running your own copy: [docs/REPRODUCTION.md](docs/REPRODUCTION.md). Full writeup with dashboard screenshots: [I Built a Bot to Apply to Jobs for Me. Then a Referral Got Me the Job.](https://mycyberworld.org/2026/09/12/jobbot-self-hosted-ai-job-application-pipeline/)
 
 ## Quickstart
 
@@ -99,7 +99,7 @@ One month of live running cost $15.42 in API calls against a $40 cap: letter wri
 
 ## How it was built
 
-Nine Claude Code sessions, one layer each, with a `CLAUDE.md` carrying the rules and a handoff note at the end of every session. Proxmox snapshot between sessions. Every session that created something new proposed the structure and stopped for review before writing code. Submission ran in dry-run for two full sessions before the first live flag flip. The full writeup is at [mycyberworld.org](https://mycyberworld.org/?p=921).
+Nine Claude Code sessions, one layer each, with a `CLAUDE.md` carrying the rules and a handoff note at the end of every session. Proxmox snapshot between sessions. Every session that created something new proposed the structure and stopped for review before writing code. Submission ran in dry-run for two full sessions before the first live flag flip. The full writeup is at [mycyberworld.org](https://mycyberworld.org/2026/09/12/jobbot-self-hosted-ai-job-application-pipeline/).
 
 ## Responsible use
 
