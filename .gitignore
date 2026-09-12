@@ -1,0 +1,48 @@
+# secrets and personal data: never committed
+.env
+.env.*
+!.env.example
+credentials/
+*.pdf
+config/application-answers.md
+config/application-answers-*.md
+!config/application-answers.example.md
+master-prompt.md
+
+# runtime state
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+exports/
+screenshots/
+letters/
+*.log
+logs/
+PAUSE
+
+# python
+__pycache__/
+*.pyc
+venv/
+.venv/
+.pytest_cache/
+
+# node / playwright
+node_modules/
+.playwright/
+
+# editor
+.vscode/
+.idea/
+*.swp
+
+# per-operator files (examples ship, real ones never do)
+identity.json
+targets.json
+state.json
+submissions/
+reports/
+backups/
+followups/

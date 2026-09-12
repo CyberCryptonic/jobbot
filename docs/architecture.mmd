@@ -1,0 +1,79 @@
+%%{init: {"theme":"dark","flowchart":{"curve":"basis","nodeSpacing":50,"rankSpacing":70,"padding":12},"themeVariables":{"fontFamily":"Inter, Segoe UI, sans-serif","fontSize":"14px","primaryColor":"#161b22","primaryTextColor":"#e6edf3","primaryBorderColor":"#4da3ff","lineColor":"#8b98a5","clusterBkg":"#0f1216","clusterBorder":"#2b3440","edgeLabelBackground":"#0f1216"}}}%%
+flowchart TB
+
+  subgraph NET["Internet"]
+    direction LR
+    APIS["Job APIs<br/>Adzuna · USAJobs · Jobright"]
+    MAIL["Mailbox<br/>IMAP 993 · SMTP 465"]
+    LLM["Anthropic API<br/>$40/mo hard cap"]
+  end
+
+  subgraph EDGE["Home network edge"]
+    direction LR
+    UDM["UniFi Dream Machine Pro<br/>zone firewall"]
+    SW["UniFi USW-Ultra<br/>managed switch"]
+    PC["Desktop PC<br/>Trusted VLAN"]
+  end
+
+  subgraph PVE["Proxmox host"]
+    subgraph LAB["Lab VLAN"]
+      subgraph CT["jobbot · Ubuntu 24.04 · unprivileged LXC · CT 200"]
+        direction LR
+        DISC["1 Discovery<br/>dedupe by URL hash<br/>tag apply_route"]
+        SCORE["2 Scoring<br/>0–100 · reason · tier<br/>daily quota"]
+        LET["3 Cover letters<br/>PDF per job<br/>lint: no em dash"]
+        SUB{"4 Submission<br/>apply_route?"}
+        ATS["Playwright → ATS only<br/>Greenhouse · Lever · Ashby · Workable"]
+        MQ["Manual Queue<br/>LinkedIn · Indeed · Glassdoor<br/>phone-first, under 60 s"]
+        DB[("SQLite · jobbot.db<br/>postings · applications · answer bank<br/>commands · activity_log")]
+        TRI["5 Inbox triage<br/>rejection · interview · action · noise<br/>day-7 / day-14 follow-ups"]
+        RPT["6 Nightly report<br/>HTML email 7:00 PM<br/>+ ntfy one-liner"]
+        CHATD["7 chatd daemon<br/>10 tools · polls every 3 s<br/>only dashboard rows reach it"]
+        CADDY["Dashboard · Caddy :80<br/>Overview · Manual Queue · Chat"]
+        NTFY["ntfy push :2586<br/>self-hosted"]
+        CRON["cron · local time<br/>every job checks ~/jobbot/PAUSE"]
+      end
+    end
+  end
+
+  subgraph REMOTE["Remote"]
+    PHONE["Phone<br/>Tailscale · http://jobbot"]
+  end
+
+  %% pipeline
+  DISC --> SCORE --> LET --> SUB
+  SUB -- "ats" --> ATS
+  SUB -- "native" --> MQ
+  CRON -.-> DISC
+  DISC & SCORE & LET & ATS & TRI & CHATD --> DB
+  DB --> RPT
+  DB --> CADDY
+  TRI -- "interview request" --> NTFY
+  RPT --> NTFY
+  MQ --- CADDY
+
+  %% network
+  SW -- "tagged trunk to Lab VLAN" --> PVE
+  PC --> SW
+  SW --> UDM
+  UDM -- "Allow Trusted → Lab" --> CADDY
+  CT -- "Block Lab → Gateway" --x UDM
+  APIS -.->|postings| DISC
+  MAIL <-.->|IMAP / SMTP| TRI
+  LLM -.->|LLM calls| SCORE
+  LLM -.-> CHATD
+  PHONE -. "Tailscale MagicDNS" .-> CADDY
+  NTFY -. "push" .-> PHONE
+
+  classDef ext fill:#2a1f10,stroke:#ffb454,color:#ffd9a0
+  classDef fw fill:#2a1416,stroke:#ff6b6b,color:#ffb3b3
+  classDef stage fill:#12233a,stroke:#4da3ff,color:#e6edf3
+  classDef human fill:#0f2a1f,stroke:#3ddc97,color:#d9ffe9
+  classDef store fill:#1b2129,stroke:#e6edf3,color:#e6edf3
+  classDef client fill:#1a1d22,stroke:#8b98a5,color:#e6edf3
+  class APIS,MAIL,LLM ext
+  class UDM fw
+  class DISC,SCORE,LET,SUB,ATS,TRI,RPT,CHATD,CRON stage
+  class MQ,CADDY,NTFY human
+  class DB store
+  class SW,PC,PHONE client
