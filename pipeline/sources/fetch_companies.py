@@ -16,7 +16,7 @@ from .common import BASE_DIR, get_json, http, posting, clean_text
 # example keeps a fresh clone importable until you create it.
 _targets_file = BASE_DIR / "targets.json"
 if not _targets_file.exists():
-    _targets_file = BASE_DIR / "targets.example.json"
+    _targets_file = BASE_DIR / "config" / "targets.example.json"
 TARGETS = json.loads(_targets_file.read_text())
 TITLE_RX = re.compile(TARGETS["title_filter_default"], re.I)
 WD_SEARCHES = ["security", "cyber", "network engineer"]

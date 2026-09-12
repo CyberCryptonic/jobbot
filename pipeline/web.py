@@ -4,7 +4,7 @@ Serves the static dashboard pages and a JSON API that reads/writes SQLite.
 Runs under waitress on 127.0.0.1:8090; Caddy reverse-proxies :80 to it, so
 nothing here is reachable except through Caddy (or locally).
 
-Run manually:   ./venv/bin/python web.py
+Run manually:   ./venv/bin/python pipeline/web.py
 Run for real:   systemd unit jobbot-web (systemd/jobbot-web.service)
 
 Design notes:
@@ -101,7 +101,7 @@ def health():
 CRON_STAGE_LABEL = {"discovery": "Discovery + scoring + letters",
                     "submission": "Submission batch", "topup": "Top-up cycle",
                     "inbox": "Inbox pass", "report": "Nightly report"}
-CRON_RX = re.compile(r"^(\d{1,2})\s+(\d{1,2})\s+\*\s+\*\s+\*\s+.*python\s+(\w+)\.py")
+CRON_RX = re.compile(r"^(\d{1,2})\s+(\d{1,2})\s+\*\s+\*\s+\*\s+.*python\s+(?:pipeline/)?(\w+)\.py")
 
 
 def _next_runs(now=None):
@@ -177,7 +177,7 @@ def _notifications(conn):
                     "title": f"Auto-submit is holding for your review ({lc}/{vn} live sends)",
                     "detail": "The head screenshots each of its first sends and stops until "
                               "you look them over. Review the screenshots, then run "
-                              "`./venv/bin/python submission.py --reviewed` to let it continue.",
+                              "`./venv/bin/python pipeline/submission.py --reviewed` to let it continue.",
                     "target": "/submissions#review"})
     gaps = db.open_gaps(conn)
     if gaps:
@@ -887,7 +887,7 @@ def answers_get():
     with closing(db.connect()) as conn:
         gaps = db.open_gaps(conn)
     ident, ident_file = {}, "identity.json"
-    for name in ("identity.json", "identity.example.json"):
+    for name in ("identity.json", "config/identity.example.json"):
         try:
             ident = {k: v for k, v in
                      json.loads((db.BASE_DIR / name).read_text()).items()

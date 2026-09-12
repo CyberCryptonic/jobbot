@@ -12,8 +12,8 @@ system prompt pins it as untrusted data. A posting that tries to steer
 automation gets flagged (suspicious=1, outcome='flag' log row) and is never
 auto-queued.
 
-Run standalone:  ./venv/bin/python scoring.py          (score + queue)
-                 ./venv/bin/python scoring.py --no-queue
+Run standalone:  ./venv/bin/python pipeline/scoring.py          (score + queue)
+                 ./venv/bin/python pipeline/scoring.py --no-queue
 """
 
 import json

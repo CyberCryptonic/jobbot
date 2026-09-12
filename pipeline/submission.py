@@ -36,11 +36,11 @@ then handed off exactly as before; live, it is submitted and the row becomes
 report — verification, not a gate (operator cleared the self-stop ramp
 2026-09-01; --reviewed remains only to clear a stale/manual hold flag).
 
-Run:  ./venv/bin/python submission.py            # build packets for queued ats/direct rows
-      ./venv/bin/python submission.py --ids 108,194
-      ./venv/bin/python submission.py --dry-run --autosubmit --ids 167   # fill + screenshot, nothing sent, nothing changed
-      ./venv/bin/python submission.py --reviewed       # clear a stale/manually-set awaiting_review hold
-      ./venv/bin/python submission.py --reset-dryrun   # un-hide manual-queue cards marked in dry run
+Run:  ./venv/bin/python pipeline/submission.py            # build packets for queued ats/direct rows
+      ./venv/bin/python pipeline/submission.py --ids 108,194
+      ./venv/bin/python pipeline/submission.py --dry-run --autosubmit --ids 167   # fill + screenshot, nothing sent, nothing changed
+      ./venv/bin/python pipeline/submission.py --reviewed       # clear a stale/manually-set awaiting_review hold
+      ./venv/bin/python pipeline/submission.py --reset-dryrun   # un-hide manual-queue cards marked in dry run
 """
 
 import hashlib

@@ -46,9 +46,9 @@ Ubuntu 24.04 unprivileged LXC on Proxmox, on its own Lab VLAN behind zone firewa
 
 - `config/application-answers.md` — single source of truth for every application form field (copy the example, fill it in)
 - `resume.pdf` (or `RESUME_PATH` in `.env`) — mode 444
-- `identity.json` — mode 600, the only identity source the submit head reads (copy the example)
+- `identity.json` — mode 600, the only identity source the submit head reads (copy `config/identity.example.json`)
 - `.env` — mode 600, never read values into logs or output
-- `test_smtp.py`, `test_adzuna.py`, `test_usajobs.py`, `test_api.sh` — working connection tests (they run real sends/calls; not collected by pytest), reuse their patterns
+- `scripts/test_smtp.py`, `scripts/test_adzuna.py`, `scripts/test_usajobs.py`, `scripts/test_api.sh` — working connection tests (they run real sends/calls; not collected by pytest), reuse their patterns
 
 `.env` keys: `ANTHROPIC_API_KEY`, `MAIL_ADDRESS`, `MAIL_PASSWORD`, `MAIL_IMAP_HOST`, `MAIL_IMAP_PORT` (993 SSL), `MAIL_SMTP_HOST`, `MAIL_SMTP_PORT` (465 SSL), `NTFY_URL`, `NTFY_TOPIC`, `REPORT_TO`, `DB_PATH`, `RESUME_PATH`
 
@@ -136,11 +136,11 @@ One per job that asks. Under 300 words. PDF with a header block matching the res
 
 Rules: no em dashes; active voice with a human subject; cut adverbs; no throat-clearing openers ("I am writing to express my interest in"); no "not X, but Y" — state Y; no three-item lists where two do the work; vary sentence length, three consecutive similar-length sentences means break one; be specific — name the actual tool, result, company detail; no sentence that reads like a pull-quote.
 
-Material lives in `letters.py` (`MATERIAL`, plus the fixed facts in `SYSTEM`) — replace the example applicant's entries with your own true material. Each letter connects one or two entries to something specific in the posting. If two letters in a batch would read identically with the company name swapped, both are wrong. Regenerate.
+Material lives in `pipeline/letters.py` (`MATERIAL`, plus the fixed facts in `SYSTEM`) — replace the example applicant's entries with your own true material. Each letter connects one or two entries to something specific in the posting. If two letters in a batch would read identically with the company name swapped, both are wrong. Regenerate.
 
 ## Layer 6 — Submission (8:00 AM)
 
-`ats` and `direct` → the autonomous head (`autosubmit.py`, Playwright over ATS forms), when enabled in config. Attach resume unmodified, cover letter when asked, screening answers from the answer file. Any CAPTCHA challenge, login wall, or assessment routes to manual and the domain is remembered.
+`ats` and `direct` → the autonomous head (`pipeline/autosubmit.py`, Playwright over ATS forms), when enabled in config. Attach resume unmodified, cover letter when asked, screening answers from the answer file. Any CAPTCHA challenge, login wall, or assessment routes to manual and the domain is remembered.
 
 `native` → Manual Queue. Dashboard view for a folded phone, under 60 seconds per job, thumb-only, no typing. Each card: company/role/salary/score → one-line why → **Open & Apply** deep link → **Copy cover letter** → screening answers as tappable copy chips → **Mark applied** / **Skip**. Sort by score. Badge the count. Roll untouched to tomorrow flagged carried-over.
 

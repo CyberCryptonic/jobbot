@@ -19,16 +19,16 @@ cd ~/jobbot
 python3 -m venv venv
 ./venv/bin/pip install -r requirements.txt
 ./venv/bin/playwright install chromium
-cp identity.example.json identity.json && chmod 600 identity.json   # then fill it in
-cp targets.example.json targets.json                                # then list your companies
+cp config/identity.example.json identity.json && chmod 600 identity.json   # then fill it in
+cp config/targets.example.json targets.json                                # then list your companies
 cp config/application-answers.example.md config/application-answers.md   # then fill it in
-./venv/bin/python -c "import db; db.init_db(); print('schema ok at', db.DB_PATH)"
+./venv/bin/python -c "import sys; sys.path.insert(0, 'pipeline'); import db; db.init_db(); print('schema ok at', db.DB_PATH)"
 ```
 
-Point Caddy at the dashboard and install the two services. `install-services.sh` copies the shipped `deploy/Caddyfile` into place, fills the systemd unit placeholders with your user and checkout path, and health-checks the result:
+Point Caddy at the dashboard and install the two services. `deploy/install-services.sh` copies the shipped `deploy/Caddyfile` into place, fills the systemd unit placeholders with your user and checkout path, and health-checks the result:
 
 ```
-sudo bash install-services.sh
+sudo bash deploy/install-services.sh
 ```
 
 Open `http://jobbot` (Tailscale) or the container IP (Trusted VLAN). You should see the Overview page with empty panels.
@@ -38,13 +38,13 @@ Open `http://jobbot` (Tailscale) or the container IP (Trusted VLAN). You should 
 The shipped `config.json` is already in dry run (`submission.dry_run: true`, `inbox_pass.dry_run: true`, browser head disabled). Run each stage by hand once so you can read what it does:
 
 ```
-./venv/bin/python discovery.py      # pulls postings, dedupes, tags apply_route, then runs scoring and letters
-./venv/bin/python submission.py     # dry run: logs what it would do, clicks nothing
-./venv/bin/python inbox.py          # dry run: classifies your inbox without writing to the tracker
-./venv/bin/python report.py         # emails you the nightly report
+./venv/bin/python pipeline/discovery.py      # pulls postings, dedupes, tags apply_route, then runs scoring and letters
+./venv/bin/python pipeline/submission.py     # dry run: logs what it would do, clicks nothing
+./venv/bin/python pipeline/inbox.py          # dry run: classifies your inbox without writing to the tracker
+./venv/bin/python pipeline/report.py         # emails you the nightly report
 ```
 
-(`letters.py` can also run alone, for example `./venv/bin/python letters.py --top 5`.)
+(`letters.py` can also run alone, for example `./venv/bin/python pipeline/letters.py --top 5`.)
 
 Read two nightly reports. Check the Applications page: does every row have a sensible score and reason? Open five letters side by side: do they read like five different letters? Check the Inbox page: is every classification right? Correct any that are wrong in the dropdown; your correction is what the tracker uses.
 
@@ -67,7 +67,7 @@ crontab -l
 
 Every job checks for `~/jobbot/PAUSE` before doing anything. `touch ~/jobbot/PAUSE` stops the whole system; `rm ~/jobbot/PAUSE` resumes it.
 
-The chat daemon and dashboard services were installed by `install-services.sh` in step 2 (`jobbot-web` and `jobbot-chatd`); `systemctl status jobbot-chatd` confirms the Chat page has a listener.
+The chat daemon and dashboard services were installed by `deploy/install-services.sh` in step 2 (`jobbot-web` and `jobbot-chatd`); `systemctl status jobbot-chatd` confirms the Chat page has a listener.
 
 ## 5. Go live, carefully
 

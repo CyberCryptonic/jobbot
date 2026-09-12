@@ -8,9 +8,9 @@ For every queued, non-suspicious job it fills what is missing, in this order:
 Everything runs inside one db.Run('materials'), so the Agent view timeline
 shows a materials lane per day and the spend counters see every token.
 
-Run:  ./venv/bin/python materials.py                # all three, for what's missing
-      ./venv/bin/python materials.py --only letters|research|answers
-      ./venv/bin/python materials.py --ids 444,479 --force
+Run:  ./venv/bin/python pipeline/materials.py                # all three, for what's missing
+      ./venv/bin/python pipeline/materials.py --only letters|research|answers
+      ./venv/bin/python pipeline/materials.py --ids 444,479 --force
 """
 
 import json

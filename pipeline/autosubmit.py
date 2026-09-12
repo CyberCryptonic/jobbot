@@ -84,7 +84,7 @@ def load_identity(path=None, env=None):
     path = Path(path or IDENTITY_PATH)
     env = env if env is not None else db.ENV
     if not path.exists():
-        raise IdentityError(f"{path.name} missing (copy identity.example.json to identity.json, chmod 600)")
+        raise IdentityError(f"{path.name} missing (copy config/identity.example.json to identity.json, chmod 600)")
     mode = stat.S_IMODE(path.stat().st_mode)
     if mode & 0o077:
         raise IdentityError(f"{path.name} mode is {oct(mode)}; must be 0600")

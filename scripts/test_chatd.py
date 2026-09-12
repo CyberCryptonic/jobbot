@@ -15,6 +15,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "pipeline"))
 import db
 
 SCRATCH = Path(sys.argv[sys.argv.index("--scratch") + 1]) if "--scratch" in sys.argv else Path(tempfile.mkdtemp(prefix="chatd-test-"))

@@ -2,7 +2,7 @@ import json, urllib.parse, urllib.request
 from pathlib import Path
 
 env = {}
-for line in Path(__file__).resolve().parent / '.env'.read_text().splitlines():
+for line in Path(__file__).resolve().parent.parent / '.env'.read_text().splitlines():
     line = line.strip()
     if '=' in line and not line.startswith('#'):
         k, v = line.split('=', 1)

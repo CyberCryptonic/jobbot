@@ -7,7 +7,7 @@
 #      YOURUSER/path placeholders replaced by the project owner and root
 #   4. enables + starts both, then health-checks through caddy
 set -euo pipefail
-PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OWNER="$(stat -c %U "$PROJECT_ROOT")"
 cd "$PROJECT_ROOT"
 
@@ -15,7 +15,7 @@ echo "== caddy =="
 if [ ! -f /etc/caddy/Caddyfile.bak-stock ]; then
     cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak-stock
 fi
-cp deploy/Caddyfile /etc/caddy/Caddyfile
+cp "$PROJECT_ROOT/deploy/Caddyfile" /etc/caddy/Caddyfile
 caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
 systemctl reload caddy
 echo "Caddyfile installed and reloaded (stock config kept at Caddyfile.bak-stock)"
@@ -23,7 +23,7 @@ echo "Caddyfile installed and reloaded (stock config kept at Caddyfile.bak-stock
 echo "== services =="
 for unit in web chatd; do
     sed -e "s/YOURUSER/$OWNER/g" -e "s|/home/$OWNER/jobbot|$PROJECT_ROOT|g" \
-        "deploy/$unit.service" > "/etc/systemd/system/jobbot-$unit.service"
+        "$PROJECT_ROOT/deploy/$unit.service" > "/etc/systemd/system/jobbot-$unit.service"
 done
 systemctl daemon-reload
 systemctl enable --now jobbot-web jobbot-chatd

@@ -1,5 +1,5 @@
 #!/bin/bash
-source "$(dirname "$0")/.env"
+source "$(dirname "$0")/../.env"
 
 curl -s https://api.anthropic.com/v1/messages \
   -H "x-api-key: $ANTHROPIC_API_KEY" \

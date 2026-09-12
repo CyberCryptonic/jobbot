@@ -34,7 +34,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-BASE_DIR = Path(__file__).resolve().parent
+# Repo root: this module lives in pipeline/, but every runtime file
+# (.env, config.json, identity.json, PAUSE, letters/, logs/) anchors here.
+BASE_DIR = Path(__file__).resolve().parent.parent
 TZ = ZoneInfo("America/New_York")
 
 # ---------------------------------------------------------------------------
@@ -163,12 +165,12 @@ def migrate():
     if "turns" not in have:
         conn.execute("ALTER TABLE chat_messages ADD COLUMN turns TEXT")
     # tables added after v1 (CREATE IF NOT EXISTS is idempotent)
-    conn.executescript((BASE_DIR / "schema.sql").read_text())
+    conn.executescript((Path(__file__).resolve().parent / "schema.sql").read_text())
     conn.close()
 
 def init_db():
     conn = connect()
-    conn.executescript((BASE_DIR / "schema.sql").read_text())
+    conn.executescript((Path(__file__).resolve().parent / "schema.sql").read_text())
     conn.commit()
     conn.close()
 

@@ -13,9 +13,9 @@ letters (with sameness warnings, never suppressed) · source health · warnings
 and failures · running totals + week's response rate · token spend today and
 MTD · one observation.
 
-Run:  ./venv/bin/python report.py            # send
-      ./venv/bin/python report.py --no-send  # build reports/<date>.html only
-      ./venv/bin/python report.py --date 2026-08-27
+Run:  ./venv/bin/python pipeline/report.py            # send
+      ./venv/bin/python pipeline/report.py --no-send  # build reports/<date>.html only
+      ./venv/bin/python pipeline/report.py --date 2026-08-27
 """
 
 import html

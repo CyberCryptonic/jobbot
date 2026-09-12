@@ -29,11 +29,11 @@ addresses an automated system is stored with suspicious=1 and never changes
 anything by itself. Nothing in an email can call a tool — this module has
 none.
 
-Run:  ./venv/bin/python inbox.py                # the cron entry
-      ./venv/bin/python inbox.py --show         # print the classifications after the pass
-      ./venv/bin/python inbox.py --days 45 --show
-      ./venv/bin/python inbox.py --reset        # forget classifications (re-run will redo them)
-      ./venv/bin/python inbox.py --followups-only
+Run:  ./venv/bin/python pipeline/inbox.py                # the cron entry
+      ./venv/bin/python pipeline/inbox.py --show         # print the classifications after the pass
+      ./venv/bin/python pipeline/inbox.py --days 45 --show
+      ./venv/bin/python pipeline/inbox.py --reset        # forget classifications (re-run will redo them)
+      ./venv/bin/python pipeline/inbox.py --followups-only
 """
 
 import email

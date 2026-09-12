@@ -50,10 +50,10 @@ jobbot ingests untrusted text all day and holds real credentials, so isolation c
 1. **Build the box.** Follow [docs/BUILD-GUIDE.md](docs/BUILD-GUIDE.md): container, VLAN, TUN device for Tailscale, timezone first, `ufw`, Caddy, ntfy. The guide ends with a connection test for every external dependency. Do not skip it.
 2. **Credentials.** Copy `.env.example` to `.env`, fill it in, `chmod 600 .env`. Set a monthly spend cap on your API key before you paste it.
 3. **Answer bank.** Copy `config/application-answers.example.md` to `config/application-answers.md` and fill it in. The submit head only fills fields it can source from this file; anything else routes to you.
-4. **Identity and resume.** Copy `identity.example.json` to `identity.json`, fill it in, `chmod 600 identity.json`. Drop your resume PDF in the project root as `resume.pdf` (or set `RESUME_PATH`) and `chmod 444` it.
+4. **Identity and resume.** Copy `config/identity.example.json` to `identity.json`, fill it in, `chmod 600 identity.json`. Drop your resume PDF in the project root as `resume.pdf` (or set `RESUME_PATH`) and `chmod 444` it.
 5. **Install.** `python3 -m venv venv && ./venv/bin/pip install -r requirements.txt && ./venv/bin/playwright install chromium`
-6. **Initialize.** `./venv/bin/python -c "import db; db.init_db(); print('schema ok at', db.DB_PATH)"`
-7. **Schedule and services.** `crontab deploy/crontab`, then `sudo bash install-services.sh` for the dashboard and chat daemon.
+6. **Initialize.** `./venv/bin/python -c "import sys; sys.path.insert(0, 'pipeline'); import db; db.init_db(); print('schema ok at', db.DB_PATH)"`
+7. **Schedule and services.** `crontab deploy/crontab`, then `sudo bash deploy/install-services.sh` for the dashboard and chat daemon.
 8. **Dry run.** The shipped config is safe: `submission.dry_run` is true and the browser head is disabled. Run discovery, scoring, and letters. Read the dashboard at `http://<container-ip>`. Read two nightly reports.
 9. **Go live, carefully.** Keep `quota.daily_max` at 10, flip `submission.dry_run` to false in `config.json`, and watch the first twenty confirmation screenshots on the Submissions page before enabling `submission.auto_submit`.
 10. **Kill switch.** `touch PAUSE` in the project root stops every scheduled job. `rm PAUSE` resumes.
@@ -62,32 +62,34 @@ jobbot ingests untrusted text all day and holds real credentials, so isolation c
 
 ```
 jobbot/
-├── CLAUDE.md                    # rules, schedule, writing standards; loaded by every Claude Code session
+├── pipeline/                    # every stage the cron schedule runs
+│   ├── db.py                    #   SQLite layer: schema, runs, activity log, dedup
+│   ├── discovery.py · scoring.py · letters.py · materials.py   # 6:00 AM chain
+│   ├── submission.py · autosubmit.py                           # 8:00 AM batch + browser head
+│   ├── topup.py                 #   through-the-day quota top-up
+│   ├── inbox.py · mailer.py · report.py · notify.py            # mail in, mail out, report, push
+│   ├── chatd.py · chat_tools.py #   dashboard chat daemon and its tools
+│   ├── web.py                   #   dashboard API (Flask/waitress behind Caddy)
+│   ├── answers.py               #   answer-bank parser; nothing is ever invented
+│   ├── sources/                 #   discovery: ATS endpoints, Adzuna, USAJobs, inbox alerts
+│   └── schema.sql · seed.py     #   schema and demo data
+├── dashboard/                   # static pages + assets Caddy serves; talks to web.py
 ├── config/
-│   └── application-answers.example.md   # copy to application-answers.md, fill in your answers
-├── config.json                  # pipeline knobs; ships with every safety default on
-├── deploy/                      # crontab, Caddyfile, systemd units, ntfy config
+│   ├── application-answers.example.md   # copy to config/application-answers.md, fill in
+│   ├── identity.example.json    #   copy to ./identity.json (mode 600)
+│   └── targets.example.json     #   copy to ./targets.json: your company watchlist
+├── deploy/                      # crontab, Caddyfile, systemd units, ntfy config, install scripts
 ├── docs/
 │   ├── BUILD-GUIDE.md           # container, VLAN, firewall, Tailscale, mail, ntfy — the full build
 │   ├── REPRODUCTION.md          # from clone to first live send
 │   ├── architecture.{png,svg,mmd}
 │   └── *.md                     # design specs the build sessions worked from
-├── dashboard/                   # static pages + assets Caddy serves; talks to web.py
-├── sources/                     # discovery: ATS endpoints, Adzuna, USAJobs, inbox alerts
+├── scripts/                     # standalone connection tests (real sends; not collected by pytest)
 ├── tests/                       # pytest suite (168 tests); safe on a fresh clone
-├── db.py                        # SQLite layer: schema, runs, activity log, dedup
-├── discovery.py · scoring.py · letters.py · materials.py   # 6:00 AM chain
-├── submission.py · autosubmit.py                           # 8:00 AM batch + browser head
-├── topup.py                     # through-the-day quota top-up
-├── inbox.py · mailer.py · report.py · notify.py            # mail in, mail out, nightly report, push
-├── chatd.py · chat_tools.py     # dashboard chat daemon and its tools
-├── web.py                       # dashboard API (Flask/waitress behind Caddy)
-├── answers.py                   # answer-bank parser; nothing is ever invented
-├── schema.sql · seed.py         # schema and demo data
-├── identity.example.json        # copy to identity.json (mode 600)
-├── targets.example.json         # copy to targets.json: your company watchlist
-├── install-services.sh · update-services.sh
-├── .env.example · SECURITY.md · PUBLISHING.md
+├── config.json                  # pipeline knobs; ships with every safety default on
+├── CLAUDE.md                    # rules, schedule, writing standards; loaded by every Claude Code session
+├── .env.example · requirements.txt · pytest.ini
+├── SECURITY.md · PUBLISHING.md
 └── LICENSE                      # MIT
 ```
 

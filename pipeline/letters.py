@@ -16,10 +16,10 @@ offending letter's opener quoted back as something to avoid.
 Security: posting text goes to the model inside <posting> tags under a system
 prompt that pins it as untrusted data. Suspicious rows never get letters.
 
-Run:  ./venv/bin/python letters.py                  # every queued job without a letter
-      ./venv/bin/python letters.py --top 5          # highest-scoring queued jobs lacking one
-      ./venv/bin/python letters.py --ids 444,479 --force
-      ./venv/bin/python letters.py --lint some.txt  # lint any text against the rules
+Run:  ./venv/bin/python pipeline/letters.py                  # every queued job without a letter
+      ./venv/bin/python pipeline/letters.py --top 5          # highest-scoring queued jobs lacking one
+      ./venv/bin/python pipeline/letters.py --ids 444,479 --force
+      ./venv/bin/python pipeline/letters.py --lint some.txt  # lint any text against the rules
 Files:  letters/{id}-{company}.pdf  (ships)   .txt (dashboard copy)   .json (meta)
 """
 
@@ -50,7 +50,7 @@ HARD_ECHO_DAYS = int(LCFG.get("hard_echo_days", 60))    # the hard IR/MITRE echo
 LETTERS_DIR = db.BASE_DIR / "letters"
 
 # Header block: name and contact lines come from identity.json (gitignored;
-# copy identity.example.json and fill it in). Keep the headline and links in
+# copy config/identity.example.json and fill it in). Keep the headline and links in
 # sync with the resume the pipeline attaches, so letter and resume read as
 # one document.
 

@@ -13,8 +13,8 @@ merges each pair listed in PAIRS into one row:
      `merge_duplicate` activity row's `detail` so it is recoverable;
   4. one `reconcile_summary` row records before/after counts.
 
-Run on a copy first:  ./venv/bin/python reconcile.py --db /path/copy.db
-Live:                 ./venv/bin/python reconcile.py
+Run on a copy first:  ./venv/bin/python pipeline/reconcile.py --db /path/copy.db
+Live:                 ./venv/bin/python pipeline/reconcile.py
 """
 
 import json

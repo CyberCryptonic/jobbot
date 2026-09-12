@@ -8,9 +8,9 @@ single source failing — or returning garbage — never touches the others.
 A source that returns zero when its previous run found postings logs a WARN
 ("went quiet") so a dead feed never masquerades as a slow job market.
 
-Run:  ./venv/bin/python discovery.py                 # all sources + scoring + materials
-      ./venv/bin/python discovery.py --source inbox  # one source, no scoring
-      ./venv/bin/python discovery.py --no-score
+Run:  ./venv/bin/python pipeline/discovery.py                 # all sources + scoring + materials
+      ./venv/bin/python pipeline/discovery.py --source inbox  # one source, no scoring
+      ./venv/bin/python pipeline/discovery.py --no-score
 """
 
 import json

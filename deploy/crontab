@@ -11,11 +11,11 @@
 # 12:00 PM / 6:30 PM  inbox passes
 # 7:00 PM  nightly report
 
-0 6 * * *   cd $HOME/jobbot && ./venv/bin/python discovery.py  >> logs/discovery.log 2>&1
-0 8 * * *   cd $HOME/jobbot && ./venv/bin/python submission.py >> logs/submission.log 2>&1
-0 11 * * *  cd $HOME/jobbot && ./venv/bin/python topup.py      >> logs/topup.log 2>&1
-0 12 * * *  cd $HOME/jobbot && ./venv/bin/python inbox.py      >> logs/inbox.log 2>&1
-0 14 * * *  cd $HOME/jobbot && ./venv/bin/python topup.py      >> logs/topup.log 2>&1
-0 17 * * *  cd $HOME/jobbot && ./venv/bin/python topup.py      >> logs/topup.log 2>&1
-30 18 * * * cd $HOME/jobbot && ./venv/bin/python inbox.py      >> logs/inbox.log 2>&1
-0 19 * * *  cd $HOME/jobbot && ./venv/bin/python report.py     >> logs/report.log 2>&1
+0 6 * * *   cd $HOME/jobbot && ./venv/bin/python pipeline/discovery.py  >> logs/discovery.log 2>&1
+0 8 * * *   cd $HOME/jobbot && ./venv/bin/python pipeline/submission.py >> logs/submission.log 2>&1
+0 11 * * *  cd $HOME/jobbot && ./venv/bin/python pipeline/topup.py      >> logs/topup.log 2>&1
+0 12 * * *  cd $HOME/jobbot && ./venv/bin/python pipeline/inbox.py      >> logs/inbox.log 2>&1
+0 14 * * *  cd $HOME/jobbot && ./venv/bin/python pipeline/topup.py      >> logs/topup.log 2>&1
+0 17 * * *  cd $HOME/jobbot && ./venv/bin/python pipeline/topup.py      >> logs/topup.log 2>&1
+30 18 * * * cd $HOME/jobbot && ./venv/bin/python pipeline/inbox.py      >> logs/inbox.log 2>&1
+0 19 * * *  cd $HOME/jobbot && ./venv/bin/python pipeline/report.py     >> logs/report.log 2>&1

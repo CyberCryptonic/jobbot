@@ -8,7 +8,7 @@ Type=simple
 # your project root (install-services.sh substitutes these automatically).
 User=YOURUSER
 WorkingDirectory=/home/YOURUSER/jobbot
-ExecStart=/home/YOURUSER/jobbot/venv/bin/python /home/YOURUSER/jobbot/web.py
+ExecStart=/home/YOURUSER/jobbot/venv/bin/python /home/YOURUSER/jobbot/pipeline/web.py
 Restart=always
 RestartSec=3
 

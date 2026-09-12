@@ -578,7 +578,7 @@ def apply_proposal(conn, prop, run_id):
         log_path = db.BASE_DIR / "logs" / f"{stage}.log"
         with open(log_path, "ab") as lf:
             lf.write(f"\n=== {db.now()} triggered from {who} ===\n".encode())
-            subprocess.Popen([str(db.BASE_DIR / "venv/bin/python"), str(db.BASE_DIR / f"{stage}.py")],
+            subprocess.Popen([str(db.BASE_DIR / "venv/bin/python"), str(db.BASE_DIR / "pipeline" / f"{stage}.py")],
                              cwd=db.BASE_DIR, stdout=lf, stderr=subprocess.STDOUT,
                              stdin=subprocess.DEVNULL, start_new_session=True)
         _log(conn, run_id, "trigger_run", subject=stage, reason=f"started {stage}.py in the background via {who}"

@@ -19,8 +19,8 @@ What it does NOT do, on purpose:
     the free step (submission: probe + Playwright fill, no API) still runs so
     already-queued jobs keep going out.
 
-Run:  ./venv/bin/python topup.py            # one gated cycle, for cron
-      ./venv/bin/python topup.py --dry      # print the decision, run nothing
+Run:  ./venv/bin/python pipeline/topup.py            # one gated cycle, for cron
+      ./venv/bin/python pipeline/topup.py --dry      # print the decision, run nothing
 """
 import json
 import subprocess
@@ -82,7 +82,7 @@ def decide(applied_today, spend_mtd, *, daily_target, daily_max, monthly_cap, he
 def _run(script):
     """Invoke a pipeline stage as its own process (same as cron), inheriting the
     venv. Returns True on exit 0."""
-    p = subprocess.run([str(db.BASE_DIR / "venv/bin/python"), str(db.BASE_DIR / script)],
+    p = subprocess.run([str(db.BASE_DIR / "venv/bin/python"), str(db.BASE_DIR / "pipeline" / script)],
                        cwd=str(db.BASE_DIR))
     return p.returncode == 0
 

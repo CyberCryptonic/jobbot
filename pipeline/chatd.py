@@ -15,8 +15,8 @@ The reply lands in chat_messages with a JSON audit of every tool call, the
 command is marked done, and the cost is logged under stage 'chat' so the
 Overview/Agent counters include it.
 
-Run manually:   ./venv/bin/python chatd.py            (Ctrl-C to stop)
-Test on a copy: ./venv/bin/python chatd.py --db /path/copy.db --once
+Run manually:   ./venv/bin/python pipeline/chatd.py            (Ctrl-C to stop)
+Test on a copy: ./venv/bin/python pipeline/chatd.py --db /path/copy.db --once
 Run for real:   systemd unit jobbot-chatd (systemd/jobbot-chatd.service)
 """
 
